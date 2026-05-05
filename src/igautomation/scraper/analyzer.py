@@ -255,6 +255,14 @@ class ProfileAnalyzer:
             if skip_existing and username in known_good:
                 continue
 
+            # Stop if GraphQL client is rate-limited
+            if self._graphql.rate_limited:
+                logger.warning(
+                    "analyze: rate-limited by Instagram (429), stopping at %d/%d",
+                    i, len(usernames),
+                )
+                break
+
             # Check session budget if engine is attached
             if self._engine and not self._engine.can_view_profile():
                 logger.warning("analyze: session profile-view budget exhausted, stopping")

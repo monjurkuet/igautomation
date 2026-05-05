@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import urllib.parse
 from typing import Any
 
@@ -28,22 +29,34 @@ DOC_SUGGESTED_LAZY = "25878289415125440"
 
 IG_APP_ID = "936619743392459"
 
+# Sentinel returned by JS fetch when rate-limited (HTTP 429).
+_RATE_LIMITED = "__RATE_LIMITED__"
+
 
 class GraphQLClient:
     """Execute Instagram GraphQL queries through the logged-in browser.
 
     All calls use ``CDPClient.evaluate()`` to run ``fetch()`` inside the
     browser page, which automatically includes cookies and CSRF tokens.
+
+    Attributes:
+        rate_limited: Set to True when a 429 response is detected.
+            Callers should check this and back off before retrying.
     """
 
     def __init__(self, cdp: CDPClient) -> None:
         self._cdp = cdp
+        self.rate_limited: bool = False
 
     def _csrf_token(self) -> str:
         """Read the csrftoken cookie from the browser."""
         js = 'document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ""'
         result = self._cdp.evaluate(js, timeout=5)
         return result or ""
+
+    # ------------------------------------------------------------------
+    # Internal: GraphQL via POST
+    # ------------------------------------------------------------------
 
     def _fetch_graphql(
         self,
@@ -73,8 +86,14 @@ class GraphQLClient:
                     'variables': '{variables_escaped}',
                 }}).toString()
             }})
-            .then(function(r) {{ return r.json(); }})
-            .then(function(data) {{ return JSON.stringify(data); }})
+            .then(function(r) {{
+                if (r.status === 429) return '{_RATE_LIMITED}';
+                return r.json();
+            }})
+            .then(function(data) {{
+                if (data === '{_RATE_LIMITED}') return '{_RATE_LIMITED}';
+                return JSON.stringify(data);
+            }})
             .catch(function(e) {{ return JSON.stringify({{error: e.message}}); }});
         }})()
         """
@@ -82,11 +101,64 @@ class GraphQLClient:
         if not raw:
             logger.warning("GraphQL fetch returned no data (doc_id=%s)", doc_id)
             return None
+        if raw == _RATE_LIMITED:
+            self.rate_limited = True
+            logger.warning("GraphQL rate-limited (429) on doc_id=%s", doc_id)
+            return None
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
             logger.warning("GraphQL response not valid JSON (doc_id=%s)", doc_id)
             return None
+
+    # ------------------------------------------------------------------
+    # Internal: REST API via GET (with 429 handling)
+    # ------------------------------------------------------------------
+
+    def _fetch_rest(
+        self,
+        url: str,
+        timeout: float = 15,
+    ) -> str | None:
+        """Send a GET request via browser fetch() with 429 detection.
+
+        Returns:
+            JSON string of the response body, or the _RATE_LIMITED sentinel
+            if HTTP 429 was received, or None on error.
+        """
+        js = f"""
+        (function() {{
+            return fetch('{url}', {{
+                method: 'GET',
+                headers: {{
+                    'X-IG-App-ID': '{IG_APP_ID}',
+                    'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '',
+                    'X-Requested-With': 'XMLHttpRequest',
+                }}
+            }})
+            .then(function(r) {{
+                if (r.status === 429) return '{_RATE_LIMITED}';
+                return r.json();
+            }})
+            .then(function(data) {{
+                if (data === '{_RATE_LIMITED}') return '{_RATE_LIMITED}';
+                return JSON.stringify(data);
+            }})
+            .catch(function() {{ return null; }});
+        }})()
+        """
+        raw = self._cdp.evaluate(js, timeout=timeout)
+        if not raw or raw in ("None", "null", ""):
+            return None
+        if raw == _RATE_LIMITED:
+            self.rate_limited = True
+            logger.warning("REST API rate-limited (429) on %s", url[:80])
+            return _RATE_LIMITED
+        return raw
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def get_suggested_users(self, target_user_id: str) -> list[str]:
         """Fetch suggested/similar accounts for a given user ID.
@@ -138,23 +210,8 @@ class GraphQLClient:
             List of user dicts with 'username', 'pk', 'full_name' keys.
         """
         encoded = urllib.parse.quote(query)
-        js = f"""
-        (function() {{
-            return fetch('/api/v1/web/search/topsearch/?query={encoded}&context=blended', {{
-                method: 'GET',
-                headers: {{
-                    'X-IG-App-ID': '{IG_APP_ID}',
-                    'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '',
-                    'X-Requested-With': 'XMLHttpRequest',
-                }}
-            }})
-            .then(function(r) {{ return r.json(); }})
-            .then(function(data) {{ return JSON.stringify(data); }})
-            .catch(function(e) {{ return JSON.stringify({{error: e.message}}); }});
-        }})()
-        """
-        raw = self._cdp.evaluate(js, timeout=15)
-        if not raw:
+        raw = self._fetch_rest(f"/api/v1/web/search/topsearch/?query={encoded}&context=blended")
+        if not raw or raw == _RATE_LIMITED:
             return []
         try:
             data = json.loads(raw)
@@ -190,33 +247,30 @@ class GraphQLClient:
         Returns:
             Numeric user ID as string, or None.
         """
+        if self.rate_limited:
+            logger.warning("get_user_id skipped — rate limited")
+            return None
+
         # Method 1: web_profile_info API
-        js = f"""
-        (function() {{
-            return fetch('/api/v1/users/web_profile_info/?username={username}', {{
-                method: 'GET',
-                headers: {{
-                    'X-IG-App-ID': '{IG_APP_ID}',
-                    'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '',
-                    'X-Requested-With': 'XMLHttpRequest',
-                }}
-            }})
-            .then(function(r) {{ return r.json(); }})
-            .then(function(data) {{
-                var userId = data?.data?.user?.id;
-                if (userId) return userId;
-                // Fallback: walk the response for any numeric id
-                var str = JSON.stringify(data);
-                var m = str.match(/"id"\\s*:\\s*"?(\\d{{5,}})/);
-                return m ? m[1] : null;
-            }})
-            .catch(function() {{ return null; }});
-        }})()
-        """
-        result = self._cdp.evaluate(js, timeout=15)
-        if result and result not in ("None", "null", ""):
-            logger.debug("Resolved @%s → %s via web_profile_info", username, result)
-            return result
+        raw = self._fetch_rest(f"/api/v1/users/web_profile_info/?username={username}")
+        if raw == _RATE_LIMITED:
+            return None
+        if raw:
+            try:
+                data = json.loads(raw)
+                user_id = data.get("data", {}).get("user", {}).get("id")
+                if user_id:
+                    logger.debug("Resolved @%s → %s via web_profile_info", username, user_id)
+                    return str(user_id)
+                # Fallback: walk the response for any numeric id
+                data_str = json.dumps(data)
+                import re
+                m = re.search(r'"id"\s*:\s*"?(\\d{5,})"', data_str)
+                if m:
+                    logger.debug("Resolved @%s → %s via fallback scan", username, m.group(1))
+                    return m.group(1)
+            except json.JSONDecodeError:
+                pass
 
         # Method 2: navigate and parse page scripts
         logger.debug("web_profile_info failed for @%s, trying page scrape", username)
@@ -226,9 +280,9 @@ class GraphQLClient:
             var scripts = document.querySelectorAll('script');
             for (var i = 0; i < scripts.length; i++) {
                 var text = scripts[i].textContent || '';
-                var match = text.match(/"user_id"\\s*:\\s*"?(\d{5,})"?/);
+                var match = text.match(/"user_id"\\s*:\\s*"?(\\d{5,})"?/);
                 if (match) return match[1];
-                match = text.match(/"pk"\\s*:\\s*"?(\d{5,})"?/);
+                match = text.match(/"pk"\\s*:\\s*"?(\\d{5,})"?/);
                 if (match) return match[1];
             }
             if (document.title.toLowerCase().includes('not found')) return 'NOT_FOUND';
@@ -247,37 +301,29 @@ class GraphQLClient:
         This is the GraphQL-only way to get bio, follower counts, full name,
         verification status, etc. — no page navigation needed.
 
+        Handles HTTP 429 (rate limit) gracefully by setting the
+        ``rate_limited`` flag and returning None.
+
         Args:
             username: Instagram username (without @).
 
         Returns:
-            User data dict from the API, or None if not found.
+            User data dict from the API, or None if not found or rate-limited.
         """
-        js = f"""
-        (function() {{
-        return fetch('/api/v1/users/web_profile_info/?username={username}', {{
-            method: 'GET',
-            headers: {{
-            'X-IG-App-ID': '{IG_APP_ID}',
-            'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '',
-            'X-Requested-With': 'XMLHttpRequest',
-            }}
-        }})
-        .then(function(r) {{ return r.json(); }})
-        .then(function(data) {{
-            var user = data?.data?.user;
-            if (user) return JSON.stringify(user);
-            return null;
-        }})
-        .catch(function() {{ return null; }});
-        }})()
-        """
-        raw = self._cdp.evaluate(js, timeout=15)
-        if not raw or raw in ("None", "null", ""):
-            logger.debug("web_profile_info returned nothing for @%s", username)
+        if self.rate_limited:
+            logger.warning("get_web_profile_info skipped — rate limited")
+            return None
+
+        raw = self._fetch_rest(f"/api/v1/users/web_profile_info/?username={username}")
+        if not raw or raw == _RATE_LIMITED:
             return None
         try:
-            return json.loads(raw)
+            data = json.loads(raw)
+            user = data.get("data", {}).get("user")
+            if user:
+                return user
+            logger.debug("web_profile_info: no user in response for @%s", username)
+            return None
         except json.JSONDecodeError:
             logger.warning("web_profile_info: invalid JSON for @%s", username)
             return None
@@ -288,23 +334,8 @@ class GraphQLClient:
         Returns:
             List of usernames.
         """
-        js = f"""
-        (function() {{
-            return fetch('/api/v1/web/discover/people/', {{
-                method: 'GET',
-                headers: {{
-                    'X-IG-App-ID': '{IG_APP_ID}',
-                    'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '',
-                    'X-Requested-With': 'XMLHttpRequest',
-                }}
-            }})
-            .then(function(r) {{ return r.json(); }})
-            .then(function(data) {{ return JSON.stringify(data); }})
-            .catch(function(e) {{ return JSON.stringify({{error: e.message}}); }});
-        }})()
-        """
-        raw = self._cdp.evaluate(js, timeout=15)
-        if not raw:
+        raw = self._fetch_rest("/api/v1/web/discover/people/")
+        if not raw or raw == _RATE_LIMITED:
             return []
         try:
             data = json.loads(raw)
