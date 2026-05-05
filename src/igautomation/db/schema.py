@@ -56,13 +56,14 @@ CREATE TABLE IF NOT EXISTS follower_snapshots (
 
 -- Daemon session tracking
 CREATE TABLE IF NOT EXISTS sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_uuid TEXT UNIQUE NOT NULL,
-    started_at TEXT DEFAULT (datetime('now')),
-    ended_at TEXT,
-    actions_taken INTEGER DEFAULT 0,
-    accounts_discovered INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'running'
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ session_uuid TEXT UNIQUE NOT NULL,
+ strategy TEXT DEFAULT 'discovery',
+ started_at TEXT DEFAULT (datetime('now')),
+ ended_at TEXT,
+ actions_taken INTEGER DEFAULT 0,
+ accounts_discovered INTEGER DEFAULT 0,
+ status TEXT DEFAULT 'running'
 );
 
 -- LLM analysis results

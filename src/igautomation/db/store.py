@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -231,11 +232,11 @@ class AsyncDatabaseStore:
     # sessions
     # ------------------------------------------------------------------
 
-    async def create_session(self, session_uuid: str) -> int:
+    async def create_session(self, session_uuid: str, strategy: str = "discovery") -> int:
         """Start a new daemon session record."""
         cur = await self.db.execute(
-            "INSERT INTO sessions (session_uuid) VALUES (?)",
-            (session_uuid,),
+            "INSERT INTO sessions (session_uuid, strategy) VALUES (?, ?)",
+            (session_uuid, strategy),
         )
         await self.db.commit()
         return cur.lastrowid  # type: ignore[return-value]
@@ -271,13 +272,45 @@ class AsyncDatabaseStore:
         model_used: str | None = None,
         prompt_summary: str | None = None,
     ) -> int:
-        """Record an LLM analysis result."""
+        """Record a per-account LLM analysis result."""
         cur = await self.db.execute(
             """
             INSERT INTO analysis_log (account_id, analysis_type, prompt_summary, result, model_used)
             VALUES (?, ?, ?, ?, ?)
             """,
             (account_id, analysis_type, prompt_summary, result, model_used),
+        )
+        await self.db.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    async def add_session_analysis(
+        self,
+        analysis_type: str,
+        summary: str,
+        findings: str = "[]",
+        recommendations: str = "[]",
+        metrics: str = "{}",
+        model_used: str | None = None,
+    ) -> int:
+        """Record a session-level (dashboard) LLM analysis result.
+
+        Uses account_id=0 as a sentinel for session-level analyses
+        (quality reviews, strategy optimization, tier analysis).
+        """
+        cur = await self.db.execute(
+            """
+            INSERT INTO analysis_log (account_id, analysis_type, prompt_summary, result, model_used)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (0, analysis_type, summary, json.dumps({
+                "findings": findings,
+                "recommendations": recommendations,
+                "metrics": metrics,
+            }) if not findings.startswith("[") else json.dumps({
+                "findings": json.loads(findings) if isinstance(findings, str) else findings,
+                "recommendations": json.loads(recommendations) if isinstance(recommendations, str) else recommendations,
+                "metrics": json.loads(metrics) if isinstance(metrics, str) else metrics,
+            }), model_used),
         )
         await self.db.commit()
         return cur.lastrowid  # type: ignore[return-value]
