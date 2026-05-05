@@ -11,26 +11,45 @@ cli: igx
 ## Quick Reference
 
 - **Path**: `~/projects/igautomation`
-- **Python**: 3.11, editable install (no venv — global)
+- **Python**: 3.11, uv venv at `.venv/` (always `source .venv/bin/activate` first)
 - **Build**: hatchling, entry point `igx = igautomation.cli:app`
-- **Git**: 1 commit on `main`, clean tree, remote origin/main
-- **Deps**: websocket-client, requests, typer, rich; dev: pytest, ruff
+- **Git**: remote origin/main (monjurkuet/igautomation)
+- **Deps**: websocket-client, requests, typer, rich, aiosqlite, pydantic, croniter; dev: pytest, pytest-asyncio, ruff
+- **Testing**: `pytest` with `asyncio_mode = "auto"` in pyproject.toml
 
 ## Architecture (12 modules)
 
 ```
 src/igautomation/
+├── analysis/
+│   ├── __init__.py
+│   └── analyzer.py # AnalysisEngine — LLM-driven data quality & strategy
+├── behavior/
+│   ├── __init__.py
+│   ├── config.py # BehaviorConfig (Pydantic v2) + SessionConfig (dataclass)
+│   ├── engine.py # BehaviorEngine — wraps CDP with human-like timing/caps
+│   └── rate_limiter.py # RateLimiter — exponential backoff + jitter
 ├── cdp/
-│   ├── client.py      # CDPClient — short-lived WS per command
-│   └── discovery.py   # TabDiscovery — find Chrome tabs via /json
+│   ├── client.py # CDPClient — short-lived WS per command
+│   └── discovery.py # TabDiscovery — find Chrome tabs via /json
+├── daemon/
+│   ├── __init__.py
+│   ├── loop.py # DaemonLoop — LLM-orchestrated daemon main loop
+│   ├── strategies.py # DaemonConfig + 4 strategy functions
+│   └── scheduler.py # SessionScheduler — human-like daily session patterns
+├── db/
+│   ├── __init__.py
+│   ├── schema.py # SQL DDL, indexes, migrations list
+│   └── store.py # AsyncDatabaseStore — aiosqlite async CRUD
 ├── graphql/
-│   └── client.py      # GraphQLClient — IG internal APIs
+│   └── client.py # GraphQLClient — IG internal APIs
 ├── scraper/
-│   ├── collector.py   # AccountCollector — 6 discovery strategies
-│   └── analyzer.py    # ProfileAnalyzer — verify & enrich profiles
+│   ├── collector.py # AccountCollector — 6 discovery strategies
+│   └── analyzer.py # ProfileAnalyzer — verify & enrich profiles
 ├── storage/
-│   └── store.py       # JSONStore, CSVStore, SQLiteStore
-├── cli.py             # `igx` CLI (typer app)
+│   └── store.py # JSONStore, CSVStore, SQLiteStore (legacy flat stores)
+├── cli.py # `igx` CLI (typer app)
+├── migrate.py # Migrator — old schema → new DB
 └── __init__.py
 ```
 
@@ -128,19 +147,23 @@ igx analyze --input output/accounts.json    # Enrich & verify profiles
 2. **`ProfileInfo.bio` never populated** — field exists but `_analyze_one()` never extracts bio
 3. **Missing `json` top-level import in collector.py** — uses local `import json as _json` inside `json_imports()`
 4. **`upsert_accounts` count is misleading** — counts all processed, not truly new inserts
-5. **No rate-limiting / anti-detection** — only `time.sleep(0.3)` between API calls; no backoff, no 429 handling
+5. ~~**No rate-limiting / anti-detection**~~ — **FIXED**: BehaviorEngine + RateLimiter with exponential backoff (Phase 6 complete).
 6. **`navigate()` uses `time.sleep()`** — no DOM-ready or network-idle event detection
 7. **Manual JS string escaping** in `_fetch_graphql()` — fragile, potential injection risk
 8. **Hard-coded 500-account limit** in `scrape_shoutout_pages()` — not configurable
 9. **Keyword matching false positives** — short keywords like "bd", "ctg" could match unintended text
-10. **No tests** — pytest listed as dev dep but no test files exist
-11. **No venv** — installed globally in system Python
-12. **SQLite no `updated_at`** — REPLACE silently overwrites with no timestamp
-13. **No indexing** beyond PRIMARY KEY — `get_bd_models()` does full table scan
+10. ~~**No tests**~~ — **FIXED**: 98 tests passing across 6 test files
+11. ~~**No venv**~~ — **FIXED**: uv venv at .venv/ with all deps
+12. ~~**SQLite no `updated_at`**~~ — **FIXED**: AsyncDatabaseStore has proper timestamps
+13. ~~**No indexing**~~ — **FIXED**: 11 indexes on the new schema
 
-## Chrome Debug Port Issue
+## Chrome Debug Port Conventions
 
-Chrome's debug port can get overwhelmed from aggressive cascade (too many rapid WS connections). Fix: `get_user_id` now uses web_profile_info API instead of page scraping (faster, no navigation). When restarting Chrome, always use `--remote-debugging-port=9224`.
+- **Port 9224** — dedicated to igautomation (IG-logged-in Chrome instance)
+- **Port 9222** — user's main daily-driver Chrome with Facebook (and other services) already logged in. **Always prefer port 9222 for browser_navigate tasks** when the user asks to browse Facebook or other sites where they're already logged in. Do NOT use Hermes's isolated browser for these tasks.
+- When restarting Chrome, always use `--remote-debugging-port=<PORT>`.
+- Chrome's debug port can get overwhelmed from aggressive cascade (too many rapid WS connections). Fix: `get_user_id` now uses web_profile_info API instead of page scraping (faster, no navigation).
+- **WSL2 mirrored mode**: CDP ports must use `localhost` (not `127.0.0.1`) from WSL — `localhost` routes via iphlpsvc to Windows; `127.0.0.1` goes to WSL loopback (no CDP). Always verify with `curl http://localhost:PORT/json/version`.
 
 ## What's Verified Working
 
@@ -157,3 +180,121 @@ Chrome's debug port can get overwhelmed from aggressive cascade (too many rapid 
 - User approves all commands permanently
 - User prefers natural/human-sounding writing
 - Git: monjurkuet, SSH preferred
+
+## New Modules (Phase 0-2, implemented)
+
+### behavior/config.py — `BehaviorConfig` + `SessionConfig`
+
+- **BehaviorConfig** (Pydantic v2 BaseModel): tunable params — action_delay_min/max, scroll_delay_min/max, session_duration_min/max, per-session caps (likes, follows, profile_views, reel_views, searches), daily caps, read_dwell_min/max, session_cooldown_min/max. Methods: `action_delay()`, `scroll_delay()`, `read_dwell()`, `cooldown_seconds()`, `new_session()`.
+- **SessionConfig** (dataclass): mutable per-session state — `duration_seconds`, max_*/used_* counters, `started_at` (uses `time.monotonic()`). Methods: `can_like()`, `can_follow()`, `can_view_profile()`, `can_view_reel()`, `can_search()`, `time_remaining()`, `is_exhausted()`.
+
+### behavior/engine.py — `BehaviorEngine`
+
+- Wraps `CDPClient` with human-like timing, session + daily budgets.
+- Private attrs: `_cdp`, `_config`, `_session`, `_daily_likes`, `_daily_follows`, `_daily_profile_views`.
+- Methods: `scroll_feed(max_scrolls)`, `view_profile(username)`, `like_post(post_url)`, `follow_user(username)`, `search_and_browse(query, graphql)`, `watch_reel(reel_url)`, `run_session_loop(actions)`.
+- Budget checks: `can_like()`, `can_follow()`, `can_view_profile()` — check both session and daily.
+
+### db/schema.py — SQL DDL
+
+- 6 tables: `accounts`, `discovery_events`, `interaction_log`, `follower_snapshots`, `sessions`, `analysis_log`.
+- 11 indexes on username, tier, category, relevance_score, strategy, action_type, session_uuid, etc.
+- `MIGRATIONS` list for future schema evolution.
+
+### db/store.py — `AsyncDatabaseStore`
+
+- All methods are `async`, backed by `aiosqlite`.
+- Key methods: `initialize()`, `close()`, `upsert_account(data) -> id`, `get_account_by_username()`, `get_accounts_by_tier()`, `get_unanalyzed_accounts()`, `add_discovery_event()`, `get_discovery_stats()`, `log_interaction()`, `add_follower_snapshot()`, `create_session()`, `end_session()`, `add_analysis()`.
+- Uses `aiosqlite.Row` factory for dict-like access.
+- Datetimes stored as ISO-8601 UTC strings via `_now()` helper.
+
+## Implementation Plan
+
+Full plan at `docs/plans/2026-05-05-organic-ig-intelligence.md` — 7 phases, 14 tasks.
+
+**All phases complete** ✅ — 98 tests passing, all 14 tasks done.
+
+## New Modules (Phase 3-7, implemented)
+
+### analysis/analyzer.py — `AnalysisEngine`
+
+- Async LLM-driven analysis on collected data.
+- Methods: `gather_stats()`, `run_data_quality()`, `run_strategy_optimization()`, `run_tier_adjustment()`.
+- Returns `AnalysisResult` (summary, findings, recommendations, metrics).
+- `save_result()` writes to `session_analyses` table via `AsyncDatabaseStore.add_session_analysis()`.
+
+### behavior/rate_limiter.py — `RateLimiter`
+
+- Async rate limiter with exponential backoff + jitter.
+- `RateLimitConfig` (Pydantic): base_delay, max_delay, backoff_factor, jitter_fraction, cooldown_threshold, cooldown_duration.
+- `RateLimiter.acquire()` — delays between calls, detects 429/rate-limit signals.
+- `record_error(signal)` / `record_success()` — track consecutive errors, apply backoff.
+- `RateLimitResponse` — wraps CDP/GraphQL responses, auto-detects rate-limit signals.
+- Context manager support (`async with rate_limiter:`).
+- Concurrency limiter via asyncio.Semaphore.
+
+### daemon/loop.py — `DaemonLoop`
+
+- LLM-driven daemon: `run_forever()` and `run_one(strategy)`.
+- 4 strategies: discovery, profiling, monitoring, engagement.
+- Each strategy uses BehaviorEngine for human-like actions.
+- Session management: `create_session()`, `end_session()`, `get_status()`.
+- Random skip probability (0.1) + cooldown jitter per strategy.
+
+### daemon/strategies.py — `DaemonConfig` + strategy functions
+
+- `DaemonConfig` (dataclass): db_path, behavior_config, strategies, session_duration, skip_probability, cooldown_range.
+- `from_yaml(path)` classmethod for config files.
+- Strategy functions: `run_discovery()`, `run_profiling()`, `run_monitoring()`, `run_engagement()`.
+
+### daemon/scheduler.py — `SessionScheduler`
+
+- Generates human-like daily session patterns.
+- `SessionScheduleConfig` (Pydantic): waking hours, session counts, gap configs, cluster probability.
+- `_generate_slots(day)` → list of datetime slots, weighted by activity periods.
+- `_enforce_gaps()` — cluster logic (short gaps with probability) or enforce minimum gaps.
+- `next_slot()` / `seconds_until_next()` / `peek_slots()` — for daemon integration.
+- Day boundary enforcement (no sessions past midnight).
+
+### migrate.py — `Migrator`
+
+- Migrates from old SQLite (accounts + user_ids) + JSON exports to new schema.
+- Maps `is_bd`/`is_model` → `category`/`tier` fields.
+- Parses human-readable counts ("101K" → 101000).
+- Auto-assigns tier: mega (100K+), macro (50K+), mid (10K+), micro (1K+), nano (<1K).
+- CLI: `python -m igautomation.migrate [--dry-run]`
+
+## Updated CLI Commands
+
+```
+igx tabs                    # List Chrome tabs
+igx discover --seeds ...    # Discover accounts via cascade
+igx search "query"          # Search IG users
+igx suggest username        # Get suggested accounts
+igx analyze --input file    # Enrich & verify profiles
+igx session --strategy ...  # Run a single organic session
+igx daemon start            # Start the daemon
+igx daemon stop             # Stop the daemon
+igx daemon status           # Show daemon status + DB stats
+igx daemon analyze --type quality|strategy|tier  # Run LLM analysis
+igx db stats                # Database statistics
+igx db export               # Export to JSON
+igx db migrate              # Migrate from old schema
+```
+
+## Hermes Cron
+
+- **Job**: `igautomation-daily-analysis` (ID: 8c132b902732)
+- **Schedule**: Daily at 9:00 AM (Asia/Dhaka)
+- **Action**: Runs AnalysisEngine (data quality + strategy optimization) and reports to this Telegram thread
+
+## Implementation Pitfalls
+
+- **pytest-asyncio fixtures**: Must use `@pytest_asyncio.fixture` (NOT `@pytest.fixture`) for async fixtures, plus set `asyncio_mode = "auto"` in `[tool.pytest.ini_options]`. Otherwise async fixtures yield the generator object, not the resolved value.
+- **Subagent timeouts**: Delegating medium-complexity file-writing tasks to subagents often times out (600s). Writing files directly is faster and more reliable for tasks under ~5 files.
+- **Private attrs in subagent code**: When subagents write class code with private attrs (`_cdp`, `_session`), tests must reference those same names — not the public names you might assume.
+- **`time.monotonic()` vs `time.time()`**: `SessionConfig.time_remaining()` uses `monotonic`. Tests that set `started_at = time.time() - X` will fail because monotonic and time epochs differ. Always use `time.monotonic()` in tests too.
+
+## Reference Files
+
+- `references/implementation-status.md` — phase-by-phase progress tracker, test counts, git commit log
