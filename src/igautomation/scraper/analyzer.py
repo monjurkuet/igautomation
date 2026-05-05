@@ -10,12 +10,15 @@ What changed from v1:
 - Parses numeric counts directly from API (no "101K" string parsing)
 - Keyword matching now runs on bio + full_name (API fields), not DOM text
 - Optional BehaviorEngine integration for organic timing between checks
+- Expanded tier system: mega/macro/mid/micro/nano/emerging
+- Growth status overlay: rising/stable/declining/unknown
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from igautomation.cdp.client import CDPClient
@@ -31,12 +34,24 @@ BD_KEYWORDS: list[str] = [
     "bangladesh", "bangladeshi", "bd", "deshi", "dhaka", "chittagong",
     "ctg", "sylhet", "rajshahi", "khulna", "comilla", "gazipur",
     "narayanganj", "বাংলা", "ঢাকা", "🇧🇩", "bengali",
+    "cox's bazar", "rangpur", "mymensingh", "barishal", "bogra",
+    "tongi", "savlon", "narsingdi", "brahmanbaria",
 ]
 
 MODEL_KEYWORDS: list[str] = [
     "model", "influencer", "creator", "fashion", "beauty",
     "actress", "digital creator", "artist", "content creator",
     "blogger", "stylist", "makeup", "glamour", "bold",
+    "lifestyle", "tiktok", "reel creator", "vlogger",
+    "entrepreneur", "public figure", "student influencer",
+]
+
+# Niche keywords for small/growing accounts that signal potential
+RISING_SIGNAL_KEYWORDS: list[str] = [
+    "just started", "new account", "beginner", "growing",
+    "college", "university", "student", "campus",
+    "upcoming", "aspiring", "fresh face", "new face",
+    "local", "small town", "district", "village",
 ]
 
 
@@ -62,8 +77,9 @@ class ProfileInfo:
     model_keywords_matched: list[str] = field(default_factory=list)
 
     # Classification fields (populated by analyzer or LLM)
-    tier: str = ""  # mega, macro, mid, micro, nano
+    tier: str = ""  # mega, macro, mid, micro, nano, emerging
     category: str = ""  # fashion, beauty, lifestyle, etc.
+    growth_status: str = "unknown"  # rising, stable, declining, unknown
 
     def __post_init__(self) -> None:
         if not self.url:
@@ -73,6 +89,23 @@ class ProfileInfo:
     def follower_str(self) -> str:
         """Human-readable follower count like '101K'."""
         return _format_count(self.follower_count)
+
+    @property
+    def tier_label(self) -> str:
+        """Emoji tier label like '🔥 Mid (25K–100K)'."""
+        return TIER_LABELS.get(self.tier, self.tier)
+
+    @property
+    def growth_label(self) -> str:
+        """Emoji growth label like '📈 Rising'."""
+        return GROWTH_LABELS.get(self.growth_status, self.growth_status)
+
+    @property
+    def display_tag(self) -> str:
+        """Combined tag like 'micro + rising' or just 'mid'."""
+        if self.growth_status == "rising":
+            return f"{self.tier} + rising"
+        return self.tier
 
 
 def _format_count(n: int) -> str:
@@ -85,7 +118,16 @@ def _format_count(n: int) -> str:
 
 
 def _classify_tier(follower_count: int) -> str:
-    """Classify an account into an influencer tier by follower count."""
+    """Classify an account into an influencer tier by follower count.
+
+    Tiers:
+        mega     — 1M+ followers (celebrities, national figures)
+        macro    — 100K–1M (established influencers, brand ambassadors)
+        mid      — 25K–100K (solid influencers, regional reach)
+        micro    — 5K–25K (niche influencers, engaged communities)
+        nano     — 1K–5K (small but real following)
+        emerging — <1K (just starting out, has potential signals)
+    """
     if follower_count >= 1_000_000:
         return "mega"
     if follower_count >= 100_000:
@@ -94,7 +136,71 @@ def _classify_tier(follower_count: int) -> str:
         return "mid"
     if follower_count >= 5_000:
         return "micro"
-    return "nano"
+    if follower_count >= 1_000:
+        return "nano"
+    return "emerging"
+
+
+def compute_growth_status(
+    snapshots: list[tuple[int, str]],
+    min_snapshots: int = 2,
+) -> tuple[str, float]:
+    """Compute growth status and rate from follower snapshots.
+
+    Args:
+        snapshots: List of (follower_count, iso_timestamp) tuples, oldest first.
+        min_snapshots: Minimum snapshots needed to determine growth.
+
+    Returns:
+        (growth_status, growth_rate) where:
+        - growth_status: "rising", "stable", "declining", "unknown"
+        - growth_rate: weekly percentage change (e.g. 5.2 means +5.2%/week)
+    """
+    if len(snapshots) < min_snapshots:
+        return ("unknown", 0.0)
+
+    oldest_count, oldest_ts = snapshots[0]
+    newest_count, newest_ts = snapshots[-1]
+
+    if oldest_count <= 0:
+        return ("unknown", 0.0)
+
+    try:
+        t_old = datetime.fromisoformat(oldest_ts.replace("Z", "+00:00"))
+        t_new = datetime.fromisoformat(newest_ts.replace("Z", "+00:00"))
+        days = (t_new - t_old).days
+        if days <= 0:
+            return ("unknown", 0.0)
+    except (ValueError, TypeError):
+        return ("unknown", 0.0)
+
+    raw_rate = (newest_count - oldest_count) / oldest_count * 100
+    weekly_rate = raw_rate / days * 7
+
+    if weekly_rate >= 3.0:
+        return ("rising", round(weekly_rate, 2))
+    if weekly_rate <= -3.0:
+        return ("declining", round(weekly_rate, 2))
+    return ("stable", round(weekly_rate, 2))
+
+
+# "Rising" is an overlay — an account can be any static tier AND rising.
+# Example: a "micro" account with +10%/week growth is "micro + rising".
+TIER_LABELS: dict[str, str] = {
+    "mega": "🏆 Mega (1M+)",
+    "macro": "⭐ Macro (100K–1M)",
+    "mid": "🔥 Mid (25K–100K)",
+    "micro": "📌 Micro (5K–25K)",
+    "nano": "🌱 Nano (1K–5K)",
+    "emerging": "✨ Emerging (<1K)",
+}
+
+GROWTH_LABELS: dict[str, str] = {
+    "rising": "📈 Rising",
+    "stable": "➡️ Stable",
+    "declining": "📉 Declining",
+    "unknown": "❓ Unknown",
+}
 
 
 class ProfileAnalyzer:
@@ -112,7 +218,7 @@ class ProfileAnalyzer:
         analyzer = ProfileAnalyzer(cdp)
         results = analyzer.analyze(["z.subha_", "anonna_fatima"])
         for profile in results:
-            print(f"@{profile.username}: BD={profile.is_bd} Model={profile.is_model} tier={profile.tier}")
+            print(f"@{profile.username}: {profile.display_tag} — followers={profile.follower_str}")
     """
 
     def __init__(
@@ -158,13 +264,11 @@ class ProfileAnalyzer:
             if info and info.exists:
                 results.append(info)
                 logger.info(
-                    "[%d/%d] @%s: BD=%s Model=%s tier=%s — followers=%s",
+                    "[%d/%d] @%s: %s — followers=%s",
                     i + 1,
                     len(usernames),
                     username,
-                    info.is_bd,
-                    info.is_model,
-                    info.tier,
+                    info.display_tag,
                     info.follower_str,
                 )
             else:
@@ -225,6 +329,13 @@ class ProfileAnalyzer:
                 info.is_model = True
                 info.model_keywords_matched.append(kw)
 
+        # Detect rising signals for small accounts
+        if info.tier in ("emerging", "nano", "micro"):
+            for kw in RISING_SIGNAL_KEYWORDS:
+                if kw.lower() in combined:
+                    info.growth_status = "rising"
+                    break
+
         return info
 
     @staticmethod
@@ -236,3 +347,8 @@ class ProfileAnalyzer:
     def filter_bd_models(profiles: list[ProfileInfo]) -> list[ProfileInfo]:
         """Return only profiles that match BD and/or model keywords."""
         return [p for p in profiles if p.is_bd or p.is_model]
+
+    @staticmethod
+    def filter_rising(profiles: list[ProfileInfo]) -> list[ProfileInfo]:
+        """Return only profiles flagged as rising (small + growing)."""
+        return [p for p in profiles if p.growth_status == "rising"]

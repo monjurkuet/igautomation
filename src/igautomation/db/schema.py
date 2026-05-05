@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     post_count INTEGER,
     category TEXT,
     tier TEXT,
+    growth_rate REAL DEFAULT 0.0,
+    growth_status TEXT DEFAULT 'unknown',
     relevance_score REAL DEFAULT 0.0,
     is_active INTEGER DEFAULT 1,
     first_seen_at TEXT DEFAULT (datetime('now')),
@@ -56,14 +58,14 @@ CREATE TABLE IF NOT EXISTS follower_snapshots (
 
 -- Daemon session tracking
 CREATE TABLE IF NOT EXISTS sessions (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- session_uuid TEXT UNIQUE NOT NULL,
- strategy TEXT DEFAULT 'discovery',
- started_at TEXT DEFAULT (datetime('now')),
- ended_at TEXT,
- actions_taken INTEGER DEFAULT 0,
- accounts_discovered INTEGER DEFAULT 0,
- status TEXT DEFAULT 'running'
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_uuid TEXT UNIQUE NOT NULL,
+    strategy TEXT DEFAULT 'discovery',
+    started_at TEXT DEFAULT (datetime('now')),
+    ended_at TEXT,
+    actions_taken INTEGER DEFAULT 0,
+    accounts_discovered INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'running'
 );
 
 -- LLM analysis results
@@ -83,6 +85,7 @@ CREATE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username);
 CREATE INDEX IF NOT EXISTS idx_accounts_tier ON accounts(tier);
 CREATE INDEX IF NOT EXISTS idx_accounts_category ON accounts(category);
 CREATE INDEX IF NOT EXISTS idx_accounts_relevance ON accounts(relevance_score DESC);
+CREATE INDEX IF NOT EXISTS idx_accounts_growth_status ON accounts(growth_status);
 CREATE INDEX IF NOT EXISTS idx_discovery_account ON discovery_events(account_id);
 CREATE INDEX IF NOT EXISTS idx_discovery_strategy ON discovery_events(strategy);
 CREATE INDEX IF NOT EXISTS idx_interaction_account ON interaction_log(account_id);
@@ -92,7 +95,15 @@ CREATE INDEX IF NOT EXISTS idx_sessions_uuid ON sessions(session_uuid);
 CREATE INDEX IF NOT EXISTS idx_analysis_account ON analysis_log(account_id);
 """
 
-# Named migrations for future schema evolution.
+# Named migrations for schema evolution.
 MIGRATIONS: list[tuple[str, str]] = [
     ("001_initial", SCHEMA_SQL + INDEXES_SQL),
+    (
+        "002_growth_fields",
+        """
+        ALTER TABLE accounts ADD COLUMN growth_rate REAL DEFAULT 0.0;
+        ALTER TABLE accounts ADD COLUMN growth_status TEXT DEFAULT 'unknown';
+        CREATE INDEX IF NOT EXISTS idx_accounts_growth_status ON accounts(growth_status);
+        """,
+    ),
 ]

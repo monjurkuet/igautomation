@@ -597,15 +597,29 @@ def stats(
             row = await cur.fetchone()
             sessions = row[0] if row else 0
 
+            cur = await db.db.execute(
+                "SELECT growth_status, COUNT(*) as cnt FROM accounts WHERE growth_status IS NOT NULL GROUP BY growth_status"
+            )
+            growth_rows = await cur.fetchall()
+
             console.print(f"\n[bold]Database: {db_path}[/bold]")
-            console.print(f" Accounts: {total}")
-            console.print(f" Interactions: {interactions}")
-            console.print(f" Sessions: {sessions}")
+            console.print(f"  Accounts: {total}")
+            console.print(f"  Interactions: {interactions}")
+            console.print(f"  Sessions: {sessions}")
 
             if tier_rows:
                 console.print("\n[bold]By Tier:[/bold]")
+                from igautomation.scraper.analyzer import TIER_LABELS
                 for r in tier_rows:
-                    console.print(f"  {r['tier']}: {r['cnt']}")
+                    label = TIER_LABELS.get(r["tier"], r["tier"])
+                    console.print(f"  {label}: {r['cnt']}")
+
+            if growth_rows:
+                console.print("\n[bold]Growth Status:[/bold]")
+                from igautomation.scraper.analyzer import GROWTH_LABELS
+                for r in growth_rows:
+                    label = GROWTH_LABELS.get(r["growth_status"], r["growth_status"])
+                    console.print(f"  {label}: {r['cnt']}")
 
             if disc_stats:
                 console.print("\n[bold]Discovery Strategies:[/bold]")

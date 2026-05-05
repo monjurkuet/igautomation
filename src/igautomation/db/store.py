@@ -108,7 +108,7 @@ class AsyncDatabaseStore:
             "user_id", "full_name", "bio", "profile_pic_url",
             "is_private", "is_verified", "follower_count",
             "following_count", "post_count", "category", "tier",
-            "relevance_score", "is_active",
+            "growth_rate", "growth_status", "relevance_score", "is_active",
         ):
             if key in data:
                 fields.append(key)
@@ -227,6 +227,67 @@ class AsyncDatabaseStore:
         )
         await self.db.commit()
         return cur.lastrowid  # type: ignore[return-value]
+
+    async def get_follower_snapshots(
+        self, account_id: int, limit: int = 30
+    ) -> list[dict]:
+        """Return follower snapshots for an account, oldest first."""
+        cur = await self.db.execute(
+            """
+            SELECT follower_count, following_count, post_count, snapshot_at
+            FROM follower_snapshots
+            WHERE account_id = ?
+            ORDER BY snapshot_at ASC
+            LIMIT ?
+            """,
+            (account_id, limit),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def update_growth_status(
+        self, account_id: int, growth_status: str, growth_rate: float
+    ) -> None:
+        """Update an account's growth_status and growth_rate."""
+        await self.db.execute(
+            """
+            UPDATE accounts
+            SET growth_status = ?, growth_rate = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (growth_status, growth_rate, _now(), account_id),
+        )
+        await self.db.commit()
+
+    async def refresh_growth_for_all(self) -> dict[str, int]:
+        """Recompute growth_status for all accounts with >= 2 snapshots.
+
+        Returns counts: {"rising": N, "stable": N, "declining": N, "unknown": N}.
+        """
+        from igautomation.scraper.analyzer import compute_growth_status
+
+        counts: dict[str, int] = {"rising": 0, "stable": 0, "declining": 0, "unknown": 0}
+
+        cur = await self.db.execute(
+            """
+            SELECT a.id, COUNT(fs.id) as snap_count
+            FROM accounts a
+            LEFT JOIN follower_snapshots fs ON a.id = fs.account_id
+            GROUP BY a.id
+            HAVING snap_count >= 2
+            """
+        )
+        accounts = await cur.fetchall()
+
+        for acct in accounts:
+            account_id = acct["id"]
+            snapshots = await self.get_follower_snapshots(account_id)
+            snap_tuples = [(s["follower_count"], s["snapshot_at"]) for s in snapshots]
+            status, rate = compute_growth_status(snap_tuples)
+            await self.update_growth_status(account_id, status, rate)
+            counts[status] += 1
+
+        return counts
 
     # ------------------------------------------------------------------
     # sessions

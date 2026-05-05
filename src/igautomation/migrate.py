@@ -134,17 +134,19 @@ class Migrator:
                         category = "bd_model"
                     else:
                         category = "bd"
-                if followers is not None:
-                    if followers >= 100_000:
-                        tier = "mega"
-                    elif followers >= 50_000:
-                        tier = "macro"
-                    elif followers >= 10_000:
-                        tier = "mid"
-                    elif followers >= 1_000:
-                        tier = "micro"
-                    else:
-                        tier = "nano"
+            if followers is not None:
+                if followers >= 1_000_000:
+                    tier = "mega"
+                elif followers >= 100_000:
+                    tier = "macro"
+                elif followers >= 25_000:
+                    tier = "mid"
+                elif followers >= 5_000:
+                    tier = "micro"
+                elif followers >= 1_000:
+                    tier = "nano"
+                else:
+                    tier = "emerging"
 
                 account_id = await new_db.upsert_account({
                     "username": username,
@@ -184,17 +186,19 @@ class Migrator:
                         category = "bd_model"
                     else:
                         category = "bd"
-                if followers is not None:
-                    if followers >= 100_000:
-                        tier = "mega"
-                    elif followers >= 50_000:
-                        tier = "macro"
-                    elif followers >= 10_000:
-                        tier = "mid"
-                    elif followers >= 1_000:
-                        tier = "micro"
-                    else:
-                        tier = "nano"
+            if followers is not None:
+                if followers >= 1_000_000:
+                    tier = "mega"
+                elif followers >= 100_000:
+                    tier = "macro"
+                elif followers >= 25_000:
+                    tier = "mid"
+                elif followers >= 5_000:
+                    tier = "micro"
+                elif followers >= 1_000:
+                    tier = "nano"
+                else:
+                    tier = "emerging"
 
                 account_id = await new_db.upsert_account({
                     "username": username,
