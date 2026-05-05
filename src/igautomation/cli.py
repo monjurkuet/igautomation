@@ -323,6 +323,7 @@ def analyze(
         typer.Option("--input", "-i", help="JSON file with accounts to analyze"),
     ] = "output/accounts.json",
     port: Annotated[int, typer.Option("--port", "-p")] = 9224,
+    save_db: Annotated[bool, typer.Option("--save-db", help="Persist results to database")] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-V")] = False,
 ) -> None:
     """Analyze accounts from a JSON file — verify profiles and check BD/model keywords."""
@@ -345,6 +346,45 @@ def analyze(
     bd_models = ProfileAnalyzer.filter_bd_models(profiles)
     console.print(f"\n[bold]Results:[/bold] {len(profiles)} verified, {len(bd_models)} BD/model matches")
 
+    # Persist to database if requested
+    if save_db:
+        async def _save():
+            from igautomation.db.store import AsyncDatabaseStore
+            db = AsyncDatabaseStore("igautomation.db")
+            await db.initialize()
+            saved = 0
+            for p in profiles:
+                if not p.exists:
+                    continue
+                acct_data = {
+                    "username": p.username,
+                    "full_name": p.full_name,
+                    "bio": p.bio,
+                    "follower_count": p.follower_count,
+                    "following_count": p.following_count,
+                    "post_count": p.post_count,
+                    "is_private": p.is_private,
+                    "is_verified": p.is_verified,
+                    "tier": p.tier,
+                    "category": p.category,
+                    "growth_status": p.growth_status,
+                }
+                if p.profile_pic_url:
+                    acct_data["profile_pic_url"] = p.profile_pic_url
+                await db.upsert_account(acct_data)
+                # Also take a follower snapshot for growth tracking
+                acct = await db.get_account_by_username(p.username)
+                if acct:
+                    await db.add_follower_snapshot(
+                        acct["id"], p.follower_count, p.following_count, p.post_count
+                    )
+                saved += 1
+            await db.close()
+            return saved
+
+        saved = asyncio.run(_save())
+        console.print(f"[green]Saved {saved} profiles to database[/green]")
+
     if bd_models:
         table = Table(title="BD Models")
         table.add_column("#", style="dim")
@@ -358,8 +398,8 @@ def analyze(
             table.add_row(
                 str(i),
                 p.username,
-                p.full_name,
-                p.follower_count,
+                p.full_name or "",
+                str(p.follower_count or 0),
                 "✓" if p.is_bd else "",
                 "✓" if p.is_model else "",
             )

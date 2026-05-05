@@ -41,7 +41,13 @@ class AsyncDatabaseStore:
         self._db = await aiosqlite.connect(self._db_path)
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(SCHEMA_SQL + INDEXES_SQL)
-        await self._db.commit()
+        # Run any pending migrations
+        for migration in MIGRATIONS:
+            try:
+                await self._db.executescript(migration)
+                await self._db.commit()
+            except Exception:
+                pass  # Already applied
         logger.info("Database initialized at %s", self._db_path)
 
     async def close(self) -> None:
@@ -83,6 +89,7 @@ class AsyncDatabaseStore:
                 "user_id", "full_name", "bio", "profile_pic_url",
                 "is_private", "is_verified", "follower_count",
                 "following_count", "post_count", "category", "tier",
+                "growth_rate", "growth_status",
                 "relevance_score", "is_active",
             ):
                 if key in data:
