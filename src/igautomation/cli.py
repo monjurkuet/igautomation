@@ -504,7 +504,7 @@ def status(
 
 
 @daemon_app.command()
-def analyze(
+def analyze_cmd(
     analysis_type: Annotated[
         str,
         typer.Option("--type", "-t", help="Analysis type: quality|strategy|tier"),
@@ -514,9 +514,42 @@ def analyze(
         typer.Option("--db", help="Database path"),
     ] = "igautomation.db",
 ) -> None:
-    """Trigger LLM analysis on current data (placeholder — Phase 5)."""
-    console.print(f"[yellow]LLM analysis ({analysis_type}) not yet implemented — coming in Phase 5[/yellow]")
-    console.print(f"Database: {db_path}")
+    """Run LLM analysis on collected data."""
+    import asyncio
+    from igautomation.analysis.analyzer import AnalysisEngine
+
+    async def _run():
+        engine = AnalysisEngine(db_path=db_path)
+
+        if analysis_type == "quality":
+            result = await engine.run_data_quality()
+        elif analysis_type == "strategy":
+            result = await engine.run_strategy_optimization()
+        elif analysis_type == "tier":
+            result = await engine.run_tier_adjustment()
+        else:
+            console.print(f"[red]Unknown analysis type: {analysis_type}[/red]")
+            console.print("Valid types: quality, strategy, tier")
+            raise typer.Exit(1)
+
+        table = Table(title=f"Analysis: {analysis_type}")
+        table.add_column("Key", style="dim")
+        table.add_column("Value")
+        table.add_row("analysis_type", result.analysis_type)
+        table.add_row("summary", result.summary)
+        if result.findings:
+            table.add_row("findings", json.dumps(result.findings, indent=2))
+        if result.recommendations:
+            table.add_row("recommendations", json.dumps(result.recommendations, indent=2))
+        if result.metrics:
+            table.add_row("metrics", json.dumps(result.metrics, indent=2, default=str))
+        console.print(table)
+
+    asyncio.run(_run())
+
+
+# Rename so typer picks up the command name properly
+analyze_cmd.__name__ = "analyze"
 
 
 # -----------------------------------------------------------------------
@@ -620,6 +653,45 @@ def export(
             await db.close()
 
     asyncio.run(_export())
+
+
+@db_app.command()
+def migrate(
+    from_db: Annotated[
+        str,
+        typer.Option("--from-db", help="Path to old SQLite database"),
+    ] = "output/igautomation.db",
+    from_json: Annotated[
+        str,
+        typer.Option("--from-json", help="Path to old JSON export"),
+    ] = "output/bd_models.json",
+    to_db: Annotated[
+        str,
+        typer.Option("--to", help="Path to new database"),
+    ] = "igautomation.db",
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Show what would be migrated without writing"),
+    ] = False,
+) -> None:
+    """Migrate data from old schema to the new database."""
+    import asyncio
+    from igautomation.migrate import Migrator
+
+    migrator = Migrator(
+        old_db_path=from_db,
+        new_db_path=to_db,
+        json_path=from_json,
+    )
+
+    stats = asyncio.run(migrator.run(dry_run=dry_run))
+
+    table = Table(title="Migration Results")
+    table.add_column("Metric", style="dim")
+    table.add_column("Count")
+    for k, v in stats.items():
+        table.add_row(k, str(v))
+    console.print(table)
 
 
 def _now_iso() -> str:
