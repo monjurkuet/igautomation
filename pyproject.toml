@@ -5,10 +5,13 @@ description = "Instagram automation, exploration, and scraping framework via Chr
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "websocket-client>=1.6",
-    "requests>=2.28",
-    "typer>=0.9",
-    "rich>=13.0",
+ "websocket-client>=1.6",
+ "requests>=2.28",
+ "typer>=0.9",
+ "rich>=13.0",
+ "aiosqlite>=0.19",
+ "pydantic>=2.0",
+ "croniter>=1.4",
 ]
 
 [project.optional-dependencies]
