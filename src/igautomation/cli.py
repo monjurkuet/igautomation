@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
 import sys
 from pathlib import Path
 from typing import Annotated, Optional
