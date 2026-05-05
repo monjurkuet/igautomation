@@ -10,17 +10,27 @@ Provides multiple discovery strategies that can be combined:
 - **Cascading discovery**: For every account found, fetch *their*
   suggestions — this expands the graph exponentially.
 - **Search API**: Use Instagram's user search endpoint.
+- **Discover People**: Fetch IG's "Discover People" suggestions.
+- **Feed browsing**: Scroll the home feed and collect accounts.
+
+All strategies now accept an optional BehaviorEngine for organic
+timing and budget enforcement. Without an engine, they fall back
+to a simple 0.3s delay (backward-compatible).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import time
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 
 from igautomation.cdp.client import CDPClient, SKIP_USERNAMES
 from igautomation.cdp.discovery import TabDiscovery
 from igautomation.graphql.client import GraphQLClient
+
+if TYPE_CHECKING:
+    from igautomation.behavior.engine import BehaviorEngine
 
 logger = logging.getLogger(__name__)
 
@@ -144,18 +154,27 @@ def _is_individual_account(username: str) -> bool:
 class AccountCollector:
     """High-level account discovery combining multiple strategies.
 
+    Now integrates with BehaviorEngine for organic timing. When no
+    engine is provided, falls back to simple 0.3s delays.
+
     Usage::
 
         cdp = CDPClient()
         cdp.connect(ws_url)
 
-        collector = AccountCollector(cdp)
+        collector = AccountCollector(cdp, engine=my_engine)
         accounts = collector.collect(seed_usernames=["z.subha_"], target_count=100)
     """
 
-    def __init__(self, cdp: CDPClient, graphql: GraphQLClient | None = None) -> None:
+    def __init__(
+        self,
+        cdp: CDPClient,
+        graphql: GraphQLClient | None = None,
+        engine: BehaviorEngine | None = None,
+    ) -> None:
         self._cdp = cdp
         self._graphql = graphql or GraphQLClient(cdp)
+        self._engine = engine
         self._accounts: set[str] = set()
         self._user_ids: dict[str, str] = {}
         self._callbacks: list[Callable[[str, int], None]] = []
@@ -182,6 +201,13 @@ class AccountCollector:
                 cb(msg, total)
             except Exception:
                 pass
+
+    def _organic_delay(self) -> None:
+        """Sleep with organic timing — use engine if available, else 0.3s."""
+        if self._engine:
+            self._engine._delay()
+        else:
+            time.sleep(0.3)
 
     def _add(self, username: str) -> None:
         if username.lower() in SKIP_USERNAMES:
@@ -228,7 +254,7 @@ class AccountCollector:
             raw = self._cdp.evaluate(js, timeout=10)
             if raw:
                 try:
-                    profiles = json_imports(raw)
+                    profiles = _json_loads(raw)
                     new = self._add_many(profiles)
                     self._emit(f"  Tab {tab.get('url','')}: +{new} ({len(self._accounts)} total)")
                 except Exception:
@@ -236,7 +262,7 @@ class AccountCollector:
         return len(self._accounts)
 
     # ------------------------------------------------------------------
-    # Strategy 2: Shoutout pages
+    # Strategy 2: Shoutout pages (with organic scrolling)
     # ------------------------------------------------------------------
     def scrape_shoutout_pages(
         self,
@@ -244,6 +270,8 @@ class AccountCollector:
         max_per_page: int = 12,
     ) -> int:
         """Visit shoutout/feature pages, scroll, and collect profile links.
+
+        Uses BehaviorEngine for organic scroll delays when available.
 
         Args:
             pages: List of shoutout page usernames. Uses BD_SHOUTOUT_PAGES
@@ -262,6 +290,11 @@ class AccountCollector:
                 self._emit("Hit account limit, stopping shoutout scraping")
                 break
 
+            # Check session budget
+            if self._engine and self._engine._session.is_exhausted():
+                self._emit("Session exhausted, stopping shoutout scraping")
+                break
+
             url = f"https://www.instagram.com/{page}/"
             self._cdp.navigate(url, wait=3)
 
@@ -270,13 +303,17 @@ class AccountCollector:
             if "not found" in title.lower():
                 continue
 
-            # Scroll and collect
-            found = self._cdp.scroll(max_scrolls=max_per_page, delay=1.5)
+            # Organic scroll — use engine's scroll_feed if available
+            if self._engine:
+                found = self._engine.scroll_feed(max_scrolls=max_per_page)
+            else:
+                found = self._cdp.scroll(max_scrolls=max_per_page, delay=1.5)
+
             new = self._add_many(found)
             if new > 0:
                 self._emit(f"  [{i+1}] @{page}: +{new} ({len(self._accounts)} total)")
 
-            time.sleep(0.3)
+            self._organic_delay()
 
         return len(self._accounts) - before
 
@@ -299,7 +336,12 @@ class AccountCollector:
         before = len(self._accounts)
 
         for username in usernames:
-            # Resolve user ID (navigate to profile)
+            # Check session budget
+            if self._engine and self._engine._session.is_exhausted():
+                self._emit("Session exhausted, stopping suggestion fetches")
+                break
+
+            # Resolve user ID
             uid = self._user_ids.get(username)
             if not uid:
                 uid = self._graphql.get_user_id(username)
@@ -315,12 +357,12 @@ class AccountCollector:
             if new > 0:
                 self._emit(f"  @{username}: +{new} suggestions ({len(self._accounts)} total)")
 
-            time.sleep(0.3)
+            self._organic_delay()
 
         return len(self._accounts) - before
 
     # ------------------------------------------------------------------
-    # Strategy 4: Hashtag pages
+    # Strategy 4: Hashtag pages (with organic scrolling)
     # ------------------------------------------------------------------
     def scrape_hashtags(
         self,
@@ -342,20 +384,28 @@ class AccountCollector:
         before = len(self._accounts)
 
         for tag in hashtags:
+            if self._engine and self._engine._session.is_exhausted():
+                self._emit("Session exhausted, stopping hashtag scraping")
+                break
+
             url = f"https://www.instagram.com/explore/tags/{tag}/"
             self._cdp.navigate(url, wait=3)
 
-            found = self._cdp.scroll(max_scrolls=max_scrolls, delay=1.5)
+            if self._engine:
+                found = self._engine.scroll_feed(max_scrolls=max_scrolls)
+            else:
+                found = self._cdp.scroll(max_scrolls=max_scrolls, delay=1.5)
+
             new = self._add_many(found)
             if new > 0:
                 self._emit(f"  #{tag}: +{new} ({len(self._accounts)} total)")
 
-            time.sleep(0.3)
+            self._organic_delay()
 
         return len(self._accounts) - before
 
     # ------------------------------------------------------------------
-    # Strategy 5: User search
+    # Strategy 5: User search (with organic timing)
     # ------------------------------------------------------------------
     def search_users(self, queries: list[str] | None = None) -> int:
         """Search for users via Instagram's search API.
@@ -374,7 +424,15 @@ class AccountCollector:
         self._cdp.navigate("https://www.instagram.com/explore/", wait=2)
 
         for query in queries:
-            users = self._graphql.search_users(query)
+            if self._engine and not self._engine._session.can_search():
+                self._emit("Session search budget exhausted, stopping search")
+                break
+
+            if self._engine:
+                users = self._engine.search_and_browse(query, self._graphql)
+            else:
+                users = self._graphql.search_users(query)
+
             usernames = [u["username"] for u in users if u.get("username")]
             new = self._add_many(usernames)
             # Also cache user IDs
@@ -384,14 +442,16 @@ class AccountCollector:
             if new > 0:
                 self._emit(f"  '{query}': +{new} ({len(self._accounts)} total)")
 
-            time.sleep(0.3)
+            self._organic_delay()
 
         return len(self._accounts) - before
 
     # ------------------------------------------------------------------
-    # Strategy 6: Cascading discovery
+    # Strategy 6: Cascading discovery (with organic timing)
     # ------------------------------------------------------------------
-    def cascade_suggestions(self, max_depth: int = 2, max_profiles: int = 50, target_count: int = 0) -> int:
+    def cascade_suggestions(
+        self, max_depth: int = 2, max_profiles: int = 50, target_count: int = 0
+    ) -> int:
         """For each individual account found, fetch THEIR suggestions.
 
         This is the most powerful strategy — it expands the account graph
@@ -415,6 +475,10 @@ class AccountCollector:
                 self._emit(f"Cascade: target of {target_count} reached — stopping")
                 break
 
+            if self._engine and self._engine._session.is_exhausted():
+                self._emit("Session exhausted, stopping cascade")
+                break
+
             # Find individual accounts we haven't processed yet
             candidates = sorted(
                 u for u in self._accounts
@@ -436,6 +500,9 @@ class AccountCollector:
                 if target_count > 0 and len(self._accounts) >= target_count:
                     break
 
+                if self._engine and self._engine._session.is_exhausted():
+                    break
+
                 processed.add(username)
 
                 uid = self._user_ids.get(username)
@@ -451,7 +518,7 @@ class AccountCollector:
                 if new > 0:
                     self._emit(f"  @{username}: +{new} ({len(self._accounts)} total)")
 
-                time.sleep(0.3)
+                self._organic_delay()
 
             round_new = len(self._accounts) - before
             total_new += round_new
@@ -461,6 +528,57 @@ class AccountCollector:
                 break
 
         return total_new
+
+    # ------------------------------------------------------------------
+    # Strategy 7: Discover People (new — organic)
+    # ------------------------------------------------------------------
+    def discover_people(self) -> int:
+        """Fetch Instagram's "Discover People" suggestions for the logged-in user.
+
+        This is a very organic action — IG shows this to every user
+        naturally, so it generates minimal suspicion.
+
+        Returns:
+            Number of new accounts added.
+        """
+        self._emit("Fetching Discover People suggestions...")
+        before = len(self._accounts)
+
+        suggested = self._graphql.get_discover_people()
+        new = self._add_many(suggested)
+        if new > 0:
+            self._emit(f"  Discover People: +{new} ({len(self._accounts)} total)")
+
+        self._organic_delay()
+        return len(self._accounts) - before
+
+    # ------------------------------------------------------------------
+    # Strategy 8: Feed browsing (new — organic)
+    # ------------------------------------------------------------------
+    def browse_feed(self, max_scrolls: int = 10) -> int:
+        """Scroll the home feed and collect usernames from posts.
+
+        This is the most organic action possible — it's what every
+        real user does. Collects profile links from the feed.
+
+        Returns:
+            Number of new accounts added.
+        """
+        self._emit("Browsing home feed...")
+        before = len(self._accounts)
+
+        self._cdp.navigate("https://www.instagram.com/", wait=3)
+
+        if self._engine:
+            found = self._engine.scroll_feed(max_scrolls=max_scrolls)
+        else:
+            found = self._cdp.scroll(max_scrolls=max_scrolls, delay=2.0)
+
+        new = self._add_many(found)
+        if new > 0:
+            self._emit(f"  Feed: +{new} ({len(self._accounts)} total)")
+
+        return len(self._accounts) - before
 
     # ------------------------------------------------------------------
     # Master collect method
@@ -484,6 +602,8 @@ class AccountCollector:
         """
         all_strategies = [
             "existing_tabs",
+            "feed_browse",
+            "discover_people",
             "shoutout_pages",
             "graphql_suggestions",
             "search",
@@ -505,6 +625,10 @@ class AccountCollector:
             match strategy:
                 case "existing_tabs":
                     self.scrape_existing_tabs()
+                case "feed_browse":
+                    self.browse_feed()
+                case "discover_people":
+                    self.discover_people()
                 case "shoutout_pages":
                     self.scrape_shoutout_pages()
                 case "graphql_suggestions":
@@ -515,7 +639,9 @@ class AccountCollector:
                 case "hashtags":
                     self.scrape_hashtags()
                 case "cascade":
-                    self.cascade_suggestions(max_depth=2, max_profiles=30, target_count=target_count)
+                    self.cascade_suggestions(
+                        max_depth=2, max_profiles=30, target_count=target_count
+                    )
                 case _:
                     logger.warning("Unknown strategy: %s", strategy)
 
@@ -526,10 +652,9 @@ class AccountCollector:
         return sorted(self._accounts)
 
 
-def json_imports(raw: str) -> list[str]:
+def _json_loads(raw: str) -> list[str]:
     """Parse a JSON list of strings, returning empty list on failure."""
-    import json as _json
     try:
-        return _json.loads(raw)
+        return json.loads(raw)
     except Exception:
         return []
