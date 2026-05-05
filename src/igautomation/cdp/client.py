@@ -76,8 +76,8 @@ class CDPClient:
     """
 
     def __init__(self) -> None:
-        self._ws_url: str = ""
-        self._origin: str = "chrome://inspect"
+        self._ws_url: str | None = None
+        self._origin: str | None = None  # None = no Origin header sent
         self._cmd_id: int = 0
 
     # ------------------------------------------------------------------
@@ -104,9 +104,26 @@ class CDPClient:
 
         ws = websocket.WebSocket()
         ws.settimeout(30)
-        logger.debug("Opening WebSocket to %s (origin=%s)", url, self._origin)
-        ws.connect(url, origin=self._origin)
-        return ws
+        for attempt in range(3):
+            try:
+                logger.debug(
+                    "Opening WebSocket to %s (origin=%s, attempt=%d)",
+                    url, self._origin, attempt + 1,
+                )
+                ws.connect(url, origin=self._origin)
+                return ws
+            except Exception:
+                if attempt < 2:
+                    delay = 0.5 * (2 ** attempt)  # 0.5s, 1s
+                    logger.warning(
+                        "WebSocket connect failed (attempt %d), retrying in %.1fs",
+                        attempt + 1, delay,
+                    )
+                    import time; time.sleep(delay)
+                    ws = websocket.WebSocket()
+                    ws.settimeout(30)
+                else:
+                    raise
 
     def _send_and_read(
         self,

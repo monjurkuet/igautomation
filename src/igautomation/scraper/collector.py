@@ -434,7 +434,12 @@ class AccountCollector:
             # Resolve user ID
             uid = self._user_ids.get(username)
             if not uid:
-                uid = self._graphql.get_user_id(username)
+                try:
+                    uid = self._graphql.get_user_id(username)
+                except Exception as exc:
+                    self._emit(f"  @{username}: user ID lookup failed ({exc})")
+                    self._organic_delay()
+                    continue
                 if uid:
                     self._user_ids[username] = uid
                 else:
@@ -442,7 +447,12 @@ class AccountCollector:
                     continue
 
             # Fetch suggestions
-            suggested = self._graphql.get_suggested_users(uid)
+            try:
+                suggested = self._graphql.get_suggested_users(uid)
+            except Exception as exc:
+                self._emit(f"  @{username}: suggestion fetch failed ({exc})")
+                self._organic_delay()
+                continue
             new = self._add_many(suggested)
             if new > 0:
                 self._emit(f"  @{username}: +{new} suggestions ({len(self._accounts)} total)")
