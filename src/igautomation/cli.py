@@ -35,6 +35,8 @@ from rich.table import Table
 from igautomation import __version__
 from igautomation.cdp.client import CDPClient
 from igautomation.cdp.discovery import TabDiscovery
+from igautomation.daemon.loop import DaemonLoop
+from igautomation.daemon.strategies import DaemonConfig
 from igautomation.graphql.client import GraphQLClient
 from igautomation.scraper.analyzer import ProfileAnalyzer
 from igautomation.scraper.collector import AccountCollector
@@ -364,3 +366,262 @@ def analyze(
         console.print(table)
 
     cdp.close()
+
+
+# -----------------------------------------------------------------------
+# session — run a single organic session
+# -----------------------------------------------------------------------
+@app.command()
+def session(
+    strategy: Annotated[
+        str,
+        typer.Option("--strategy", "-s", help="Strategy: discovery|profiling|monitoring|engagement"),
+    ] = "discovery",
+    db_path: Annotated[
+        str,
+        typer.Option("--db", help="Database path"),
+    ] = "igautomation.db",
+    config_file: Annotated[
+        str,
+        typer.Option("--config", help="YAML config file"),
+    ] = "",
+    verbose: Annotated[bool, typer.Option("--verbose", "-V")] = False,
+) -> None:
+    """Run a single organic session and exit."""
+    _setup_logging(verbose)
+
+    cfg = DaemonConfig.from_yaml(config_file) if config_file else DaemonConfig(db_path=db_path)
+    daemon = DaemonLoop(cfg)
+
+    console.print(f"[bold]Running single session[/bold] (strategy: {strategy})")
+    result = daemon.run_one(strategy=strategy)
+
+    # Display results
+    table = Table(title="Session Results")
+    table.add_column("Key", style="dim")
+    table.add_column("Value")
+    for k, v in result.items():
+        table.add_row(k, str(v))
+    console.print(table)
+
+
+# -----------------------------------------------------------------------
+# daemon subgroup
+# -----------------------------------------------------------------------
+daemon_app = typer.Typer(
+    name="daemon",
+    help="Manage the IG intelligence daemon.",
+    no_args_is_help=True,
+)
+app.add_typer(daemon_app, name="daemon")
+
+
+@daemon_app.command()
+def start(
+    config_file: Annotated[
+        str,
+        typer.Option("--config", "-c", help="YAML config file"),
+    ] = "",
+    db_path: Annotated[
+        str,
+        typer.Option("--db", help="Database path"),
+    ] = "igautomation.db",
+    background: Annotated[
+        bool,
+        typer.Option("--background/--foreground", help="Run as background process"),
+    ] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-V")] = False,
+) -> None:
+    """Start the IG intelligence daemon."""
+    _setup_logging(verbose)
+
+    cfg = DaemonConfig.from_yaml(config_file) if config_file else DaemonConfig(db_path=db_path)
+    daemon_loop = DaemonLoop(cfg)
+
+    if background:
+        import subprocess
+        cmd = [sys.executable, "-m", "igautomation.daemon", "--config", config_file or ""]
+        console.print("[bold]Starting daemon in background...[/bold]")
+        proc = subprocess.Popen(cmd, start_new_session=True)
+        console.print(f" PID: {proc.pid}")
+        # Write PID file
+        pid_path = Path(cfg.db_path).parent / "daemon.pid"
+        pid_path.write_text(str(proc.pid))
+        console.print(f" PID file: {pid_path}")
+    else:
+        console.print("[bold]Starting daemon (Ctrl+C to stop)...[/bold]")
+        daemon_loop.run_forever()
+
+
+@daemon_app.command()
+def stop() -> None:
+    """Stop the running daemon."""
+    pid_path = Path("daemon.pid")
+    if not pid_path.exists():
+        console.print("[yellow]No daemon.pid file found — daemon may not be running.[/yellow]")
+        raise typer.Exit()
+
+    pid = int(pid_path.read_text().strip())
+    try:
+        import os
+        import signal as sig
+        os.kill(pid, sig.SIGTERM)
+        console.print(f"[green]Sent SIGTERM to daemon (PID {pid})[/green]")
+        pid_path.unlink(missing_ok=True)
+    except ProcessLookupError:
+        console.print(f"[yellow]Process {pid} not found — already stopped?[/yellow]")
+        pid_path.unlink(missing_ok=True)
+    except PermissionError:
+        console.print(f"[red]Permission denied killing PID {pid}[/red]")
+        raise typer.Exit(1)
+
+
+@daemon_app.command()
+def status(
+    db_path: Annotated[
+        str,
+        typer.Option("--db", help="Database path"),
+    ] = "igautomation.db",
+) -> None:
+    """Show current daemon status and database statistics."""
+    import asyncio
+
+    cfg = DaemonConfig(db_path=db_path)
+    daemon_loop = DaemonLoop(cfg)
+
+    result = asyncio.run(daemon_loop.get_status())
+
+    table = Table(title="Daemon Status")
+    table.add_column("Key", style="dim")
+    table.add_column("Value")
+    for k, v in result.items():
+        if isinstance(v, dict):
+            v = json.dumps(v, indent=2)
+        elif isinstance(v, list):
+            v = ", ".join(str(i) for i in v)
+        table.add_row(k, str(v))
+    console.print(table)
+
+
+@daemon_app.command()
+def analyze(
+    analysis_type: Annotated[
+        str,
+        typer.Option("--type", "-t", help="Analysis type: quality|strategy|tier"),
+    ] = "quality",
+    db_path: Annotated[
+        str,
+        typer.Option("--db", help="Database path"),
+    ] = "igautomation.db",
+) -> None:
+    """Trigger LLM analysis on current data (placeholder — Phase 5)."""
+    console.print(f"[yellow]LLM analysis ({analysis_type}) not yet implemented — coming in Phase 5[/yellow]")
+    console.print(f"Database: {db_path}")
+
+
+# -----------------------------------------------------------------------
+# db subgroup
+# -----------------------------------------------------------------------
+db_app = typer.Typer(
+    name="db",
+    help="Database operations.",
+    no_args_is_help=True,
+)
+app.add_typer(db_app, name="db")
+
+
+@db_app.command()
+def stats(
+    db_path: Annotated[
+        str,
+        typer.Option("--db", help="Database path"),
+    ] = "igautomation.db",
+) -> None:
+    """Show database statistics."""
+    import asyncio
+    from igautomation.db.store import AsyncDatabaseStore
+
+    async def _show_stats():
+        db = AsyncDatabaseStore(db_path)
+        await db.initialize()
+        try:
+            cur = await db.db.execute("SELECT COUNT(*) FROM accounts")
+            row = await cur.fetchone()
+            total = row[0] if row else 0
+
+            cur = await db.db.execute(
+                "SELECT tier, COUNT(*) as cnt FROM accounts WHERE tier IS NOT NULL GROUP BY tier"
+            )
+            tier_rows = await cur.fetchall()
+
+            disc_stats = await db.get_discovery_stats()
+
+            cur = await db.db.execute("SELECT COUNT(*) FROM interaction_log")
+            row = await cur.fetchone()
+            interactions = row[0] if row else 0
+
+            cur = await db.db.execute("SELECT COUNT(*) FROM sessions")
+            row = await cur.fetchone()
+            sessions = row[0] if row else 0
+
+            console.print(f"\n[bold]Database: {db_path}[/bold]")
+            console.print(f" Accounts: {total}")
+            console.print(f" Interactions: {interactions}")
+            console.print(f" Sessions: {sessions}")
+
+            if tier_rows:
+                console.print("\n[bold]By Tier:[/bold]")
+                for r in tier_rows:
+                    console.print(f"  {r['tier']}: {r['cnt']}")
+
+            if disc_stats:
+                console.print("\n[bold]Discovery Strategies:[/bold]")
+                for strategy, count in disc_stats.items():
+                    console.print(f"  {strategy}: {count}")
+
+        finally:
+            await db.close()
+
+    asyncio.run(_show_stats())
+
+
+@db_app.command()
+def export(
+    output_file: Annotated[
+        str,
+        typer.Option("--output", "-o", help="Output JSON file"),
+    ] = "igautomation_export.json",
+    db_path: Annotated[
+        str,
+        typer.Option("--db", help="Database path"),
+    ] = "igautomation.db",
+) -> None:
+    """Export database to JSON."""
+    import asyncio
+    from igautomation.db.store import AsyncDatabaseStore
+
+    async def _export():
+        db = AsyncDatabaseStore(db_path)
+        await db.initialize()
+        try:
+            cur = await db.db.execute("SELECT * FROM accounts ORDER BY relevance_score DESC")
+            rows = await cur.fetchall()
+            accounts = [dict(r) for r in rows]
+
+            data = {
+                "exported_at": _now_iso(),
+                "total_accounts": len(accounts),
+                "accounts": accounts,
+            }
+
+            Path(output_file).write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+            console.print(f"[green]Exported {len(accounts)} accounts to {output_file}[/green]")
+        finally:
+            await db.close()
+
+    asyncio.run(_export())
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
