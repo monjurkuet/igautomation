@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 # Instagram GraphQL doc IDs (these change with IG deploys but are fairly stable).
 DOC_SUGGESTED_PRELOAD = "25814188068245954"
 DOC_SUGGESTED_LAZY = "25878289415125440"
-DOC_PROFILE_CONTENT = "25858451687162830"
 
 IG_APP_ID = "936619743392459"
 
@@ -242,34 +241,45 @@ class GraphQLClient:
 
         return None
 
-    def get_profile_meta(self, username: str) -> dict[str, str] | None:
-        """Get profile metadata via og:description meta tag.
+    def get_web_profile_info(self, username: str) -> dict[str, Any] | None:
+        """Fetch full profile data for a user via the web_profile_info API.
+
+        This is the GraphQL-only way to get bio, follower counts, full name,
+        verification status, etc. — no page navigation needed.
 
         Args:
-            username: Instagram username.
+            username: Instagram username (without @).
 
         Returns:
-            Dict with 'meta', 'title' keys, or None if profile not found.
+            User data dict from the API, or None if not found.
         """
-        self._cdp.navigate(f"https://www.instagram.com/{username}/", wait=3)
-        js = """
-        (function() {
-            var meta = document.querySelector('meta[property="og:description"]');
-            return JSON.stringify({
-                meta: meta ? meta.getAttribute('content') : '',
-                title: document.title
-            });
-        })()
+        js = f"""
+        (function() {{
+        return fetch('/api/v1/users/web_profile_info/?username={username}', {{
+            method: 'GET',
+            headers: {{
+            'X-IG-App-ID': '{IG_APP_ID}',
+            'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '',
+            'X-Requested-With': 'XMLHttpRequest',
+            }}
+        }})
+        .then(function(r) {{ return r.json(); }})
+        .then(function(data) {{
+            var user = data?.data?.user;
+            if (user) return JSON.stringify(user);
+            return null;
+        }})
+        .catch(function() {{ return null; }});
+        }})()
         """
-        raw = self._cdp.evaluate(js, timeout=10)
-        if not raw:
+        raw = self._cdp.evaluate(js, timeout=15)
+        if not raw or raw in ("None", "null", ""):
+            logger.debug("web_profile_info returned nothing for @%s", username)
             return None
         try:
-            data = json.loads(raw)
-            if "not found" in (data.get("title", "") + data.get("meta", "")).lower():
-                return None
-            return data
+            return json.loads(raw)
         except json.JSONDecodeError:
+            logger.warning("web_profile_info: invalid JSON for @%s", username)
             return None
 
     def get_discover_people(self) -> list[str]:
