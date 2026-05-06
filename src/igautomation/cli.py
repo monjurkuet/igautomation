@@ -50,9 +50,6 @@ app = typer.Typer(
 )
 console = Console()
 
-# -- Global options --
-CDP_BASE_URL = "http://localhost:9224"
-
 
 def _setup_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO

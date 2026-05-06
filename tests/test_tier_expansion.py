@@ -1,6 +1,5 @@
 """Tests for the expanded tier system and growth status computation."""
 
-import pytest
 from datetime import datetime, timedelta, timezone
 
 

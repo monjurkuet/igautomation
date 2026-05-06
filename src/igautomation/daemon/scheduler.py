@@ -263,21 +263,3 @@ class SessionScheduler:
         result.sort()
         return result
 
-    def _decide_gap(self) -> float:
-        """Decide the gap (in minutes) until the next session.
-
-        Uses cluster_probability: if we're in a cluster, the gap is
-        short; otherwise, it's drawn from the normal range.
-        """
-        if random.random() < self._config.cluster_probability:
-            # Cluster: tight gap
-            gap = self._config.cluster_gap_minutes + random.uniform(0, 5)
-            logger.debug("Cluster gap: %.1f min", gap)
-        else:
-            # Normal gap
-            gap = random.uniform(
-                self._config.min_gap_minutes,
-                self._config.max_gap_minutes,
-            )
-            logger.debug("Normal gap: %.1f min", gap)
-        return gap

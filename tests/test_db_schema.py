@@ -1,5 +1,4 @@
 """Tests for the async database store."""
-import pytest
 import pytest_asyncio
 
 from igautomation.db.store import AsyncDatabaseStore
@@ -88,7 +87,7 @@ async def test_get_accounts_by_tier(store):
 
 
 async def test_get_unanalyzed_accounts(store):
-    a1 = await store.upsert_account({"username": "no_analysis", "relevance_score": 0.8})
+    await store.upsert_account({"username": "no_analysis", "relevance_score": 0.8})
     a2 = await store.upsert_account({"username": "has_analysis", "relevance_score": 0.9})
     await store.add_analysis(a2, "relevance", result="high")
     unanalyzed = await store.get_unanalyzed_accounts(limit=10)

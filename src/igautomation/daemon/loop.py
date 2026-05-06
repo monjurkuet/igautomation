@@ -593,7 +593,7 @@ class DaemonLoop:
 
             return {
                 "total_accounts": total_accounts,
-                "bd_female_count": 0,  # TODO: once is_female field populated
+                "bd_female_count": 0,  # Placeholder until female-relevance signals are stored in the DB
                 "tier_breakdown": tier_breakdown,
                 "sessions_today": self._sessions_today,
                 "discovery_stats": disc_str,

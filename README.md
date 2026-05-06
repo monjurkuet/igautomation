@@ -1,8 +1,8 @@
 # igautomation
 
-Instagram automation, exploration, and scraping framework built on Chrome DevTools Protocol.
+Instagram automation, exploration, and content-processing framework built on Chrome DevTools Protocol.
 
-**How it works**: Instead of logging in separately or using unofficial APIs, igautomation connects to your already-running Chrome browser via the `--remote-debugging-port`. It executes JavaScript and `fetch()` calls inside your logged-in Instagram session, giving you full access to Instagram's internal GraphQL APIs with zero auth headaches.
+**How it works**: igautomation connects to an already-running Chrome browser via `--remote-debugging-port=9224`, then uses CDP to execute JavaScript and `fetch()` calls inside the logged-in Instagram session. That gives it access to Instagram's internal APIs without separate login handling.
 
 ## Quick Start
 
@@ -25,7 +25,7 @@ Log into Instagram in that Chrome window.
 
 ```bash
 cd ~/projects/igautomation
-pip install -e .
+uv sync
 ```
 
 ### 3. Use it
@@ -51,22 +51,19 @@ igx analyze --input output/accounts.json
 
 ```
 src/igautomation/
-├── __init__.py          # Package version
-├── cli.py               # Typer CLI (igx command)
-├── cdp/
-│   ├── __init__.py
-│   ├── client.py        # CDPClient — WebSocket CDP commands
-│   └── discovery.py     # TabDiscovery — find Chrome tabs
-├── graphql/
-│   ├── __init__.py
-│   └── client.py        # GraphQLClient — IG internal API calls
-├── scraper/
-│   ├── __init__.py
-│   ├── analyzer.py      # ProfileAnalyzer — verify & enrich accounts
-│   └── collector.py     # AccountCollector — multi-strategy discovery
-└── storage/
-    ├── __init__.py
-    └── store.py          # JSONStore, CSVStore, SQLiteStore
+├── analysis/            # LLM analysis and strategy evaluation
+├── behavior/            # Human-like browsing, rate limiting, session config
+├── cdp/                 # Chrome DevTools Protocol client + tab discovery
+├── content/              # Content loading, analysis, and engagement models
+├── daemon/              # Long-running orchestration loop and scheduling
+├── db/                  # Async SQLite schema and store
+├── graphql/              # Instagram internal API client
+├── scraper/              # Account discovery and profile analysis
+├── storage/             # Legacy JSON/CSV/SQLite export helpers
+├── cli.py               # Main Typer app (`igx`)
+├── cli_content.py       # Content/collections CLI subcommands
+├── import_accounts.py   # Import helper for account datasets
+└── migrate.py           # Database migration helper
 ```
 
 ## Discovery Strategies
@@ -86,7 +83,6 @@ src/igautomation/
 
 ```python
 from igautomation.cdp import CDPClient, TabDiscovery
-from igautomation.graphql import GraphQLClient
 from igautomation.scraper import AccountCollector
 from igautomation.scraper.analyzer import ProfileAnalyzer
 from igautomation.storage import JSONStore, SQLiteStore

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-import pytest
 
 from igautomation.daemon.scheduler import SessionScheduleConfig, SessionScheduler
 

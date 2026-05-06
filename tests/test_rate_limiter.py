@@ -46,17 +46,18 @@ class TestRateLimiterBasic:
         config = RateLimitConfig(base_delay=0.2, jitter_range=0.0)
         limiter = RateLimiter(config)
 
-        t0 = time.monotonic()
+        start = time.monotonic()
         async with limiter:
             pass
-        t1 = time.monotonic()
+        mid = time.monotonic()
         async with limiter:
             pass
-        t2 = time.monotonic()
+        end = time.monotonic()
 
         # Second call should have waited at least base_delay from first
-        gap = t2 - t1
+        gap = end - mid
         assert gap >= 0.15  # allow small clock skew
+        assert mid >= start
 
     @pytest.mark.asyncio
     async def test_record_success_resets_errors(self):
@@ -232,13 +233,13 @@ class TestCooldown:
         limiter.record_error("e2")  # triggers cooldown
         assert limiter._in_cooldown
 
-        t0 = time.monotonic()
+        start = time.monotonic()
         async with limiter:
             limiter.record_success()
-        t1 = time.monotonic()
+        end = time.monotonic()
 
         # Should have waited at least the cooldown duration
-        assert t1 - t0 >= 0.15
+        assert end - start >= 0.15
 
     @pytest.mark.asyncio
     async def test_is_cooled_down_property(self):

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -189,6 +187,5 @@ class TestDaemonLoopStrategyDispatch:
     async def test_unknown_strategy_falls_back(self):
         """An unknown strategy should fall back to discovery."""
         daemon = DaemonLoop()
-        plan = SessionPlan(strategy="nonexistent")
         # The match/case in _run_one_session handles this via default case
         assert hasattr(daemon, "_execute_discovery")

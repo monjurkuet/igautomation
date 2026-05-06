@@ -11,13 +11,13 @@ cli: igx
 ## Quick Reference
 
 - **Path**: `~/projects/igautomation`
-- **Python**: 3.11, uv venv at `.venv/` (always `source .venv/bin/activate` first)
+- **Python**: 3.11, uv-managed `.venv/`
 - **Build**: hatchling, entry point `igx = igautomation.cli:app`
 - **Git**: remote origin/main (monjurkuet/igautomation)
-- **Deps**: websocket-client, requests, typer, rich, aiosqlite, pydantic, croniter; dev: pytest, pytest-asyncio, ruff
+- **Deps**: websocket-client, requests, typer, rich, aiosqlite, pydantic, croniter, pyyaml; dev: pytest, pytest-asyncio, ruff
 - **Testing**: `pytest` with `asyncio_mode = "auto"` in pyproject.toml
 
-## Architecture (12 modules)
+## Architecture
 
 ```
 src/igautomation/
@@ -47,8 +47,10 @@ src/igautomation/
 │   ├── collector.py # AccountCollector — 6 discovery strategies
 │   └── analyzer.py # ProfileAnalyzer — verify & enrich profiles
 ├── storage/
-│   └── store.py # JSONStore, CSVStore, SQLiteStore (legacy flat stores)
+│   └── store.py # JSONStore, CSVStore, SQLiteStore (legacy export helpers still used by CLI)
 ├── cli.py # `igx` CLI (typer app)
+├── cli_content.py # content/collections CLI group
+├── import_accounts.py # bulk importer for account data
 ├── migrate.py # Migrator — old schema → new DB
 └── __init__.py
 ```
@@ -95,7 +97,7 @@ igx analyze --input output/accounts.json    # Enrich & verify profiles
 **Constants**:
 - `DOC_SUGGESTED_PRELOAD = "25814188068245954"`
 - `DOC_SUGGESTED_LAZY = "25878289415125440"`
-- `DOC_PROFILE_CONTENT = "25858451687162830"` (DEFINED BUT NEVER USED — dead code)
+- `DOC_PROFILE_CONTENT = "25858451687162830"` (kept for completeness; verify usage before deleting)
 - `IG_APP_ID = "936619743392459"`
 
 **Helper**: `_extract_usernames(data, depth=0)` — recursive walker for `username` fields in nested JSON (max depth 20)
@@ -116,7 +118,7 @@ igx analyze --input output/accounts.json    # Enrich & verify profiles
 - `collect(seed_usernames, target_count=100, strategies)` — master orchestrator
 - `get_sorted()` — returns sorted list
 - `_is_individual_account(username)` — filters out hub/shoutout pages by keyword
-- `json_imports(raw)` — local `import json` workaround (see issues)
+- `json_imports(raw)` — local JSON import helper used during CSV/JSON loading
 
 **Constants**: `BD_SHOUTOUT_PAGES` (60 pages), `BD_HASHTAGS` (21), `BD_SEARCH_TERMS` (10)
 
