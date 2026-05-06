@@ -25,7 +25,7 @@ Log into Instagram in that Chrome window.
 
 ```bash
 cd ~/projects/igautomation
-uv sync
+uv sync  # or `uv pip install -e .` if you prefer editable installs
 ```
 
 ### 3. Use it

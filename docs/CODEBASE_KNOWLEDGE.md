@@ -154,7 +154,7 @@ igx analyze --input output/accounts.json    # Enrich & verify profiles
 7. **Manual JS string escaping** in `_fetch_graphql()` — fragile, potential injection risk
 8. **Hard-coded 500-account limit** in `scrape_shoutout_pages()` — not configurable
 9. **Keyword matching false positives** — short keywords like "bd", "ctg" could match unintended text
-10. ~~**No tests**~~ — **FIXED**: 98 tests passing across 6 test files
+10. ~~**No tests**~~ — **FIXED**: 119 tests passing across 6 test files
 11. ~~**No venv**~~ — **FIXED**: uv venv at .venv/ with all deps
 12. ~~**SQLite no `updated_at`**~~ — **FIXED**: AsyncDatabaseStore has proper timestamps
 13. ~~**No indexing**~~ — **FIXED**: 11 indexes on the new schema
@@ -214,7 +214,7 @@ igx analyze --input output/accounts.json    # Enrich & verify profiles
 
 Full plan at `docs/plans/2026-05-05-organic-ig-intelligence.md` — 7 phases, 14 tasks.
 
-**All phases complete** ✅ — 98 tests passing, all 14 tasks done.
+**All phases complete** ✅ — 119 tests passing, all 14 tasks done.
 
 ## New Modules (Phase 3-7, implemented)
 
