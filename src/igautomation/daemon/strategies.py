@@ -20,12 +20,12 @@ class DaemonConfig(BaseModel):
     # LLM endpoint (OpenAI-compatible)
     llm_base_url: str = "https://llm.datasolved.org/v1"
     llm_api_key: str = ""
-    llm_model: str = "gpt-5.4-mini"
+    llm_model: str = "gemini-2.5-flash-lite"
 
     # Session scheduling
     max_sessions_per_day: int = 8
-    sleep_hours_start: int = 2   # No sessions 2am-7am
-    sleep_hours_end: int = 7
+    sleep_hours_start: int = 18  # No sessions midnight-7am BST (6pm-1am UTC)
+    sleep_hours_end: int = 1
     skip_session_probability: float = 0.15  # 15% chance to skip a session
 
     # Discovery defaults
@@ -39,6 +39,7 @@ class DaemonConfig(BaseModel):
         "search",
         "hashtags",
         "cascade",
+        "content_engagement",
     ]
 
     # LLM strategy planning
@@ -108,5 +109,7 @@ FALLBACK_PLANS: list[SessionPlan] = [
     SessionPlan(strategy="discovery", params={"strategies": ["graphql_suggestions", "cascade"]}),
     SessionPlan(strategy="monitoring", params={"max_accounts": 30}),
     SessionPlan(strategy="engagement", params={"max_likes": 5, "max_follows": 2}),
+    SessionPlan(strategy="content_engagement", params={"max_items": 10, "analyze": True}),
     SessionPlan(strategy="discovery", params={"strategies": ["search", "hashtags"]}),
+    SessionPlan(strategy="content_engagement", params={"max_items": 5, "analyze": False}),
 ]

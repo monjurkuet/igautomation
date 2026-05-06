@@ -37,6 +37,7 @@ class ContentItem(BaseModel):
 
     url: str
     content_type: ContentType = ContentType.UNKNOWN
+    shortcode: str = ""
     category: str = ""
     notes: str = ""
     priority: int = 5  # 1=low, 10=high

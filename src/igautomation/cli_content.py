@@ -12,7 +12,7 @@ from rich.table import Table
 from igautomation.cdp.discovery import TabDiscovery
 from igautomation.content.loader import load_csv
 from igautomation.content.models import ContentItem, ContentType, EngagementStatus
-from igautomation.content.analyzer import analyze_content, batch_analyze
+from igautomation.content.analyzer import analyze_content, analyze_content_browse, batch_analyze
 from igautomation.db.store import AsyncDatabaseStore
 
 console = Console()
@@ -95,10 +95,18 @@ def content_load(
 def content_analyze(
     db_path: Annotated[str, typer.Option("--db", help="SQLite database path")] = "igautomation.db",
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max items to analyze")] = 50,
-    delay: Annotated[float, typer.Option("--delay", help="Seconds between LLM calls")] = 1.0,
+    delay: Annotated[float, typer.Option("--delay", help="Seconds between items (min human-like gap)")] = 2.0,
+    dwell: Annotated[float, typer.Option("--dwell", help="Seconds to dwell on each post (read/watch)")] = 3.0,
+    no_browser: Annotated[bool, typer.Option("--no-browser", help="Skip CDP browsing, use API-only analysis")] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
-    """Analyze pending content items using LLM (Gemini 2.5 Flash Lite)."""
+    """Analyze pending content by browsing each post in Chrome, then LLM.
+
+    By default, navigates to each post/reel in Chrome like a real user,
+    extracts the caption, hashtags, alt text, and visible context, then
+    sends that real content to the LLM for categorization. Use --no-browser
+    for API-only fallback (no page context, just URL-based guessing).
+    """
     _setup_logging(verbose)
 
     async def _run():
@@ -111,7 +119,8 @@ def content_analyze(
             await store.close()
             return None
 
-        console.print(f"[bold]Analyzing {len(rows)} content items with LLM...[/]")
+        mode = "browser" if not no_browser else "api-only"
+        console.print(f"[bold]Analyzing {len(rows)} items ({mode} mode)...[/]")
 
         items = []
         for row in rows:
@@ -123,7 +132,29 @@ def content_analyze(
                 priority=row.get("priority", 5) or 5,
             ))
 
-        analyzed = batch_analyze(items, delay=delay)
+        # Connect to Chrome CDP for browser-based analysis
+        cdp = None
+        if not no_browser:
+            try:
+                from igautomation.cdp.client import CDPClient
+                ig_tab = TabDiscovery.find_ig_tab()
+                if ig_tab:
+                    cdp = CDPClient()
+                    cdp.connect(ig_tab["webSocketDebuggerUrl"])
+                    console.print("[dim]Connected to Chrome — browsing each post...[/]")
+                else:
+                    console.print("[yellow]No IG tab found — falling back to API-only[/]")
+            except Exception as exc:
+                console.print(f"[yellow]CDP connection failed: {exc} — falling back to API-only[/]")
+                cdp = None
+
+        analyzed = batch_analyze(items, delay=delay, cdp=cdp, dwell=dwell)
+
+        if cdp:
+            try:
+                cdp.close()
+            except Exception:
+                pass
 
         updated = 0
         for item in analyzed:

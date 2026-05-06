@@ -486,7 +486,11 @@ def start(
 
     if background:
         import subprocess
-        cmd = [sys.executable, "-m", "igautomation.daemon", "--config", config_file or ""]
+        cmd = [sys.executable, "-m", "igautomation.daemon", "--db", db_path]
+        if config_file:
+            cmd.extend(["--config", config_file])
+        if verbose:
+            cmd.append("--verbose")
         console.print("[bold]Starting daemon in background...[/bold]")
         proc = subprocess.Popen(cmd, start_new_session=True)
         console.print(f" PID: {proc.pid}")

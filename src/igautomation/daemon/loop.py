@@ -228,6 +228,10 @@ class DaemonLoop:
                     result = await self._execute_engagement(
                         cdp, graphql, engine, db, plan, stats
                     )
+                case "content_engagement":
+                    result = await self._execute_content_engagement(
+                        cdp, graphql, engine, db, plan, stats
+                    )
                 case _:
                     logger.warning("Unknown strategy: %s, falling back to discovery", plan.strategy)
                     result = await self._execute_discovery(
@@ -451,6 +455,85 @@ class DaemonLoop:
         # Scroll feed for organic behavior
         if not engine._session.is_exhausted():
             engine.scroll_feed(max_scrolls=random.randint(2, 5))
+            stats["actions_taken"] += 1
+
+    async def _execute_content_engagement(
+        self, cdp: CDPClient, graphql: GraphQLClient, engine: BehaviorEngine,
+        db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
+    ) -> None:
+        """Browse, analyze, and engage with content items (reels, posts, carousels)."""
+        from igautomation.content.engager import ContentEngager
+        from igautomation.content.analyzer import analyze_content_browse
+
+        max_items = plan.params.get("max_items", 10)
+        do_analyze = plan.params.get("analyze", True)
+
+        # Get pending content items from DB
+        cur = await db.db.execute(
+            """SELECT id, url, content_type, shortcode FROM content_items
+            WHERE status = 'pending' OR status = 'loaded'
+            ORDER BY RANDOM() LIMIT ?""",
+            (max_items,),
+        )
+        rows = await cur.fetchall()
+        if not rows:
+            logger.info("No pending content items for engagement")
+            return
+
+        engager = ContentEngager(cdp, db)
+
+        for row in rows:
+            if engine._session.is_exhausted():
+                break
+
+            item_id, url, content_type, shortcode = row["id"], row["url"], row["content_type"], row.get("shortcode", "")
+
+            # 1. Engage with the content (navigate, dwell, like, save)
+            try:
+                from igautomation.content.models import ContentItem, ContentType, EngagementStatus
+                ct = ContentType.REEL if content_type == "Clip" else ContentType.CAROUSEL if content_type == "Carousel" else ContentType.VIDEO
+                item = ContentItem(url=url, content_type=ct, shortcode=shortcode or "")
+                result = engager.engage_content(item)
+                stats["actions_taken"] += 1
+
+                # Determine overall engagement status
+                if result.error:
+                    overall_status = "error"
+                elif result.like == EngagementStatus.DONE or result.save == EngagementStatus.DONE:
+                    overall_status = "engaged"
+                else:
+                    overall_status = "viewed"
+
+                # Update status in DB
+                await db.update_content_engagement_status(item_id, overall_status)
+                logger.info("Engaged content %s → %s", url, overall_status)
+
+            except Exception as e:
+                logger.warning("Content engagement failed for %s: %s", url, e)
+                await db.update_content_engagement_status(item_id, "error")
+                continue
+
+            # 2. Optionally analyze with LLM while on the page
+            if do_analyze and not engine._session.is_exhausted():
+                try:
+                    analyzed_item = analyze_content_browse(cdp, item, dwell=3.0)
+                    if analyzed_item and analyzed_item.llm_analysis:
+                        await db.upsert_content_item({
+                            "url": url,
+                            "llm_analysis": analyzed_item.llm_analysis,
+                            "category": analyzed_item.category,
+                            "llm_collection_suggestion": analyzed_item.llm_collection_suggestion,
+                            "is_bd_relevant": analyzed_item.is_bd_relevant,
+                            "content_niche": analyzed_item.content_niche,
+                        })
+                        stats["actions_taken"] += 1
+                        logger.info("Analyzed content %s — category=%s", shortcode, analyzed_item.category or "?")
+                except Exception as e:
+                    logger.warning("Content analysis failed for %s: %s", url, e)
+
+        # Scroll feed organically after engagement
+        if not engine._session.is_exhausted():
+            engine.scroll_feed(max_scrolls=random.randint(1, 3))
             stats["actions_taken"] += 1
 
     # ------------------------------------------------------------------

@@ -42,9 +42,9 @@ class AsyncDatabaseStore:
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(SCHEMA_SQL + INDEXES_SQL)
         # Run any pending migrations
-        for migration in MIGRATIONS:
+        for _name, migration_sql in MIGRATIONS:
             try:
-                await self._db.executescript(migration)
+                await self._db.executescript(migration_sql)
                 await self._db.commit()
             except Exception:
                 pass  # Already applied

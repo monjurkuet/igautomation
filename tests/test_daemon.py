@@ -23,13 +23,13 @@ class TestDaemonConfig:
         cfg = DaemonConfig()
         assert cfg.db_path == "igautomation.db"
         assert cfg.cdp_port == 9224
-        assert cfg.llm_model == "gpt-5.4-mini"
+        assert cfg.llm_model == "gemini-2.5-flash-lite"
         assert cfg.max_sessions_per_day == 8
-        assert cfg.sleep_hours_start == 2
-        assert cfg.sleep_hours_end == 7
+        assert cfg.sleep_hours_start == 18
+        assert cfg.sleep_hours_end == 1
         assert cfg.skip_session_probability == 0.15
         assert cfg.llm_enabled is True
-        assert len(cfg.default_strategies) == 8
+        assert len(cfg.default_strategies) == 9
 
     def test_custom_values(self):
         cfg = DaemonConfig(db_path="test.db", cdp_port=9225, llm_enabled=False)
