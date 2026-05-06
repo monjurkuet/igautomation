@@ -382,3 +382,277 @@ class AsyncDatabaseStore:
         )
         await self.db.commit()
         return cur.lastrowid  # type: ignore[return-value]
+
+    # ------------------------------------------------------------------
+    # content_items
+    # ------------------------------------------------------------------
+
+    async def upsert_content_item(self, data: dict[str, Any]) -> int:
+        """Insert or update a content item by URL. Returns the item id."""
+        now = _now()
+        url = data["url"]
+
+        cur = await self.db.execute(
+            "SELECT id FROM content_items WHERE url = ?", (url,)
+        )
+        row = await cur.fetchone()
+
+        if row:
+            item_id = row[0]
+            update_fields = []
+            update_values: list[Any] = []
+            for key in (
+                "shortcode", "content_type", "owner_username", "owner_id",
+                "caption", "hashtags", "mentions", "media_type",
+                "video_url", "video_view_count", "video_play_count",
+                "like_count", "comment_count", "timestamp",
+                "llm_analysis", "llm_collection_suggestion", "llm_tags",
+                "is_bd_relevant", "content_niche", "priority",
+                "category", "notes", "engagement_status",
+            ):
+                if key in data:
+                    update_fields.append(f"{key} = ?")
+                    update_values.append(data[key])
+            update_fields.append("updated_at = ?")
+            update_values.append(now)
+            update_values.append(item_id)
+
+            if update_fields:
+                await self.db.execute(
+                    f"UPDATE content_items SET {', '.join(update_fields)} WHERE id = ?",
+                    update_values,
+                )
+                await self.db.commit()
+            return item_id
+
+        # INSERT
+        fields = ["url", "first_seen_at", "created_at", "updated_at"]
+        values: list[Any] = [url, now, now, now]
+        for key in (
+            "shortcode", "content_type", "owner_username", "owner_id",
+            "caption", "hashtags", "mentions", "media_type",
+            "video_url", "video_view_count", "video_play_count",
+            "like_count", "comment_count", "timestamp",
+            "llm_analysis", "llm_collection_suggestion", "llm_tags",
+            "is_bd_relevant", "content_niche", "priority",
+            "category", "notes", "engagement_status",
+        ):
+            if key in data:
+                fields.append(key)
+                values.append(data[key])
+
+        placeholders = ", ".join("?" for _ in values)
+        cols = ", ".join(fields)
+        cur = await self.db.execute(
+            f"INSERT INTO content_items ({cols}) VALUES ({placeholders})", values
+        )
+        await self.db.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    async def get_content_item_by_url(self, url: str) -> dict | None:
+        """Return content item dict by URL, or None."""
+        cur = await self.db.execute(
+            "SELECT * FROM content_items WHERE url = ?", (url,)
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def get_content_items_by_status(
+        self, engagement_status: str = "pending", limit: int = 100
+    ) -> list[dict]:
+        """Return content items with the given engagement status."""
+        cur = await self.db.execute(
+            "SELECT * FROM content_items WHERE engagement_status = ? ORDER BY priority DESC, created_at ASC LIMIT ?",
+            (engagement_status, limit),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_content_items_by_collection(
+        self, collection_name: str, limit: int = 100
+    ) -> list[dict]:
+        """Return content items assigned to a named collection."""
+        cur = await self.db.execute(
+            """
+            SELECT ci.* FROM content_items ci
+            JOIN content_collections cc ON ci.id = cc.content_item_id
+            JOIN collections c ON cc.collection_id = c.id
+            WHERE c.name = ?
+            ORDER BY ci.priority DESC
+            LIMIT ?
+            """,
+            (collection_name, limit),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_content_stats(self) -> dict[str, Any]:
+        """Return content engagement statistics."""
+        stats: dict[str, Any] = {}
+
+        cur = await self.db.execute("SELECT COUNT(*) as cnt FROM content_items")
+        stats["total_items"] = (await cur.fetchone())["cnt"]
+
+        cur = await self.db.execute(
+            "SELECT engagement_status, COUNT(*) as cnt FROM content_items GROUP BY engagement_status"
+        )
+        stats["by_status"] = {r["engagement_status"]: r["cnt"] for r in await cur.fetchall()}
+
+        cur = await self.db.execute(
+            "SELECT content_type, COUNT(*) as cnt FROM content_items GROUP BY content_type"
+        )
+        stats["by_type"] = {r["content_type"]: r["cnt"] for r in await cur.fetchall()}
+
+        cur = await self.db.execute(
+            "SELECT content_niche, COUNT(*) as cnt FROM content_items WHERE content_niche != '' GROUP BY content_niche ORDER BY cnt DESC LIMIT 20"
+        )
+        stats["by_niche"] = {r["content_niche"]: r["cnt"] for r in await cur.fetchall()}
+
+        cur = await self.db.execute(
+            "SELECT llm_collection_suggestion, COUNT(*) as cnt FROM content_items WHERE llm_collection_suggestion != '' GROUP BY llm_collection_suggestion ORDER BY cnt DESC LIMIT 20"
+        )
+        stats["by_collection_suggestion"] = {
+            r["llm_collection_suggestion"]: r["cnt"] for r in await cur.fetchall()
+        }
+
+        cur = await self.db.execute("SELECT COUNT(*) as cnt FROM collections")
+        stats["total_collections"] = (await cur.fetchone())["cnt"]
+
+        cur = await self.db.execute("SELECT COUNT(*) as cnt FROM content_engagement_log")
+        stats["total_engagement_actions"] = (await cur.fetchone())["cnt"]
+
+        cur = await self.db.execute(
+            "SELECT action_type, status, COUNT(*) as cnt FROM content_engagement_log GROUP BY action_type, status"
+        )
+        rows = await cur.fetchall()
+        action_stats: dict[str, dict[str, int]] = {}
+        for r in rows:
+            action_stats.setdefault(r["action_type"], {})[r["status"]] = r["cnt"]
+        stats["engagement_actions"] = action_stats
+
+        return stats
+
+    # ------------------------------------------------------------------
+    # content_engagement_log
+    # ------------------------------------------------------------------
+
+    async def log_content_engagement(
+        self,
+        content_item_id: int,
+        action_type: str,
+        status: str,
+        detail: str | None = None,
+        session_id: str | None = None,
+    ) -> int:
+        """Record a content engagement action."""
+        cur = await self.db.execute(
+            """
+            INSERT INTO content_engagement_log (content_item_id, action_type, status, detail, session_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (content_item_id, action_type, status, detail, session_id),
+        )
+        await self.db.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    async def update_content_engagement_status(
+        self, content_item_id: int, engagement_status: str
+    ) -> None:
+        """Update the engagement_status of a content item."""
+        await self.db.execute(
+            "UPDATE content_items SET engagement_status = ?, updated_at = ? WHERE id = ?",
+            (engagement_status, _now(), content_item_id),
+        )
+        await self.db.commit()
+
+    # ------------------------------------------------------------------
+    # collections
+    # ------------------------------------------------------------------
+
+    async def upsert_collection(
+        self,
+        name: str,
+        collection_id: str | None = None,
+        description: str = "",
+        cover_media_id: str | None = None,
+    ) -> int:
+        """Insert or update a collection by name. Returns the collection id."""
+        cur = await self.db.execute(
+            "SELECT id FROM collections WHERE name = ?", (name,)
+        )
+        row = await cur.fetchone()
+
+        if row:
+            col_id = row[0]
+            update_fields = []
+            update_values: list[Any] = []
+            if collection_id is not None:
+                update_fields.append("collection_id = ?")
+                update_values.append(collection_id)
+            if description:
+                update_fields.append("description = ?")
+                update_values.append(description)
+            if cover_media_id is not None:
+                update_fields.append("cover_media_id = ?")
+                update_values.append(cover_media_id)
+            update_fields.append("updated_at = ?")
+            update_values.append(_now())
+            update_values.append(col_id)
+
+            if update_fields:
+                await self.db.execute(
+                    f"UPDATE collections SET {', '.join(update_fields)} WHERE id = ?",
+                    update_values,
+                )
+                await self.db.commit()
+            return col_id
+
+        cur = await self.db.execute(
+            """
+            INSERT INTO collections (name, collection_id, description, cover_media_id)
+            VALUES (?, ?, ?, ?)
+            """,
+            (name, collection_id, description, cover_media_id),
+        )
+        await self.db.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    async def get_all_collections(self) -> list[dict]:
+        """Return all collections."""
+        cur = await self.db.execute(
+            "SELECT c.*, (SELECT COUNT(*) FROM content_collections cc WHERE cc.collection_id = c.id) as item_count FROM collections c ORDER BY c.name"
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_collection_by_name(self, name: str) -> dict | None:
+        """Return collection by name."""
+        cur = await self.db.execute(
+            "SELECT * FROM collections WHERE name = ?", (name,)
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def add_content_to_collection(
+        self, content_item_id: int, collection_id: int
+    ) -> int:
+        """Add a content item to a collection. Returns the mapping id."""
+        try:
+            cur = await self.db.execute(
+                """
+                INSERT INTO content_collections (content_item_id, collection_id)
+                VALUES (?, ?)
+                """,
+                (content_item_id, collection_id),
+            )
+            await self.db.commit()
+            # Update item_count
+            await self.db.execute(
+                "UPDATE collections SET item_count = item_count + 1, updated_at = ? WHERE id = ?",
+                (_now(), collection_id),
+            )
+            await self.db.commit()
+            return cur.lastrowid  # type: ignore[return-value]
+        except Exception:
+            # Already exists — ignore
+            return 0

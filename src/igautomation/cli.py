@@ -41,7 +41,12 @@ from igautomation.daemon.strategies import DaemonConfig
 from igautomation.graphql.client import GraphQLClient
 from igautomation.scraper.analyzer import ProfileAnalyzer
 from igautomation.scraper.collector import AccountCollector
+from igautomation.cli_content import content_app, collections_app
 from igautomation.storage.store import CSVStore, JSONStore, SQLiteStore
+from igautomation.content.loader import load_csv
+from igautomation.content.models import ContentItem, ContentType, EngagementStatus
+from igautomation.content.analyzer import analyze_content, batch_analyze
+from igautomation.db.store import AsyncDatabaseStore
 
 app = typer.Typer(
     name="igx",
@@ -602,6 +607,8 @@ db_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(db_app, name="db")
+app.add_typer(content_app, name="content")
+app.add_typer(collections_app, name="collections")
 
 
 @db_app.command()
@@ -752,3 +759,4 @@ def migrate(
 def _now_iso() -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
+

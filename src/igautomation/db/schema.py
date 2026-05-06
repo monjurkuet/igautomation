@@ -78,6 +78,72 @@ CREATE TABLE IF NOT EXISTS analysis_log (
     model_used TEXT,
     analyzed_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Content items for engagement tracking
+CREATE TABLE IF NOT EXISTS content_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT UNIQUE NOT NULL,
+    shortcode TEXT,
+    content_type TEXT DEFAULT 'unknown',
+    owner_username TEXT,
+    owner_id TEXT,
+    caption TEXT,
+    hashtags TEXT,
+    mentions TEXT,
+    media_type TEXT,
+    video_url TEXT,
+    video_view_count INTEGER,
+    video_play_count INTEGER,
+    like_count INTEGER,
+    comment_count INTEGER,
+    timestamp TEXT,
+    -- LLM analysis fields
+    llm_analysis TEXT,
+    llm_collection_suggestion TEXT,
+    llm_tags TEXT,
+    is_bd_relevant INTEGER DEFAULT 0,
+    content_niche TEXT,
+    -- Priority and status
+    priority INTEGER DEFAULT 5,
+    category TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    engagement_status TEXT DEFAULT 'pending',
+    first_seen_at TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Content engagement log (individual actions on content)
+CREATE TABLE IF NOT EXISTS content_engagement_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_item_id INTEGER NOT NULL REFERENCES content_items(id),
+    action_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    detail TEXT,
+    session_id TEXT,
+    performed_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Collections (IG Saved collections)
+CREATE TABLE IF NOT EXISTS collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    collection_id TEXT,
+    description TEXT DEFAULT '',
+    cover_media_id TEXT,
+    item_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Content-collection membership
+CREATE TABLE IF NOT EXISTS content_collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_item_id INTEGER NOT NULL REFERENCES content_items(id),
+    collection_id INTEGER NOT NULL REFERENCES collections(id),
+    added_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(content_item_id, collection_id)
+);
 """
 
 INDEXES_SQL = """
@@ -93,6 +159,16 @@ CREATE INDEX IF NOT EXISTS idx_interaction_type ON interaction_log(action_type);
 CREATE INDEX IF NOT EXISTS idx_follower_account ON follower_snapshots(account_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_uuid ON sessions(session_uuid);
 CREATE INDEX IF NOT EXISTS idx_analysis_account ON analysis_log(account_id);
+
+CREATE INDEX IF NOT EXISTS idx_content_items_url ON content_items(url);
+CREATE INDEX IF NOT EXISTS idx_content_items_type ON content_items(content_type);
+CREATE INDEX IF NOT EXISTS idx_content_items_niche ON content_items(content_niche);
+CREATE INDEX IF NOT EXISTS idx_content_items_engagement ON content_items(engagement_status);
+CREATE INDEX IF NOT EXISTS idx_content_engagement_item ON content_engagement_log(content_item_id);
+CREATE INDEX IF NOT EXISTS idx_content_engagement_type ON content_engagement_log(action_type);
+CREATE INDEX IF NOT EXISTS idx_collections_name ON collections(name);
+CREATE INDEX IF NOT EXISTS idx_content_collections_item ON content_collections(content_item_id);
+CREATE INDEX IF NOT EXISTS idx_content_collections_collection ON content_collections(collection_id);
 """
 
 # Named migrations for schema evolution.
@@ -104,6 +180,76 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE accounts ADD COLUMN growth_rate REAL DEFAULT 0.0;
         ALTER TABLE accounts ADD COLUMN growth_status TEXT DEFAULT 'unknown';
         CREATE INDEX IF NOT EXISTS idx_accounts_growth_status ON accounts(growth_status);
+        """,
+    ),
+    (
+        "003_content_tables",
+        """
+        CREATE TABLE IF NOT EXISTS content_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            url TEXT UNIQUE NOT NULL,
+            shortcode TEXT,
+            content_type TEXT DEFAULT 'unknown',
+            owner_username TEXT,
+            owner_id TEXT,
+            caption TEXT,
+            hashtags TEXT,
+            mentions TEXT,
+            media_type TEXT,
+            video_url TEXT,
+            video_view_count INTEGER,
+            video_play_count INTEGER,
+            like_count INTEGER,
+            comment_count INTEGER,
+            timestamp TEXT,
+            llm_analysis TEXT,
+            llm_collection_suggestion TEXT,
+            llm_tags TEXT,
+            is_bd_relevant INTEGER DEFAULT 0,
+            content_niche TEXT,
+            priority INTEGER DEFAULT 5,
+            category TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            engagement_status TEXT DEFAULT 'pending',
+            first_seen_at TEXT DEFAULT (datetime('now')),
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS content_engagement_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content_item_id INTEGER NOT NULL REFERENCES content_items(id),
+            action_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            detail TEXT,
+            session_id TEXT,
+            performed_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS collections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            collection_id TEXT,
+            description TEXT DEFAULT '',
+            cover_media_id TEXT,
+            item_count INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS content_collections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content_item_id INTEGER NOT NULL REFERENCES content_items(id),
+            collection_id INTEGER NOT NULL REFERENCES collections(id),
+            added_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(content_item_id, collection_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_content_items_url ON content_items(url);
+        CREATE INDEX IF NOT EXISTS idx_content_items_type ON content_items(content_type);
+        CREATE INDEX IF NOT EXISTS idx_content_items_niche ON content_items(content_niche);
+        CREATE INDEX IF NOT EXISTS idx_content_items_engagement ON content_items(engagement_status);
+        CREATE INDEX IF NOT EXISTS idx_content_engagement_item ON content_engagement_log(content_item_id);
+        CREATE INDEX IF NOT EXISTS idx_content_engagement_type ON content_engagement_log(action_type);
+        CREATE INDEX IF NOT EXISTS idx_collections_name ON collections(name);
+        CREATE INDEX IF NOT EXISTS idx_content_collections_item ON content_collections(content_item_id);
+        CREATE INDEX IF NOT EXISTS idx_content_collections_collection ON content_collections(collection_id);
         """,
     ),
 ]
