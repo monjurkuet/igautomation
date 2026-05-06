@@ -46,7 +46,7 @@ from igautomation.daemon.strategies import (
 )
 from igautomation.db.store import AsyncDatabaseStore
 from igautomation.graphql.client import GraphQLClient
-from igautomation.scraper.analyzer import ProfileAnalyzer, _classify_tier
+from igautomation.scraper.analyzer import ProfileAnalyzer
 from igautomation.scraper.collector import AccountCollector
 
 logger = logging.getLogger(__name__)
@@ -213,28 +213,28 @@ class DaemonLoop:
             # Execute strategy
             match plan.strategy:
                 case "discovery":
-                    result = await self._execute_discovery(
+                    await self._execute_discovery(
                         cdp, graphql, engine, db, plan, stats
                     )
                 case "profiling":
-                    result = await self._execute_profiling(
+                    await self._execute_profiling(
                         cdp, graphql, engine, db, plan, stats
                     )
                 case "monitoring":
-                    result = await self._execute_monitoring(
+                    await self._execute_monitoring(
                         cdp, graphql, engine, db, plan, stats
                     )
                 case "engagement":
-                    result = await self._execute_engagement(
+                    await self._execute_engagement(
                         cdp, graphql, engine, db, plan, stats
                     )
                 case "content_engagement":
-                    result = await self._execute_content_engagement(
+                    await self._execute_content_engagement(
                         cdp, graphql, engine, db, plan, stats
                     )
                 case _:
                     logger.warning("Unknown strategy: %s, falling back to discovery", plan.strategy)
-                    result = await self._execute_discovery(
+                    await self._execute_discovery(
                         cdp, graphql, engine, db, plan, stats
                     )
 
@@ -245,7 +245,7 @@ class DaemonLoop:
             stats["status"] = "error"
             stats["error"] = str(e)
 
-        # Finalize session
+            # Finalize session
         stats["duration_seconds"] = round(time.time() - started_at, 1)
         if stats["status"] == "started":
             stats["status"] = "completed"
@@ -377,7 +377,7 @@ class DaemonLoop:
             if engine._session.is_exhausted():
                 break
 
-            account_id, username, old_count = row["id"], row["username"], row["follower_count"]
+            account_id, username, _old_count = row["id"], row["username"], row["follower_count"]
             profile_data = graphql.get_web_profile_info(username)
             if not profile_data:
                 continue
@@ -486,7 +486,8 @@ class DaemonLoop:
             if engine._session.is_exhausted():
                 break
 
-            item_id, url, content_type, shortcode = row["id"], row["url"], row["content_type"], row.get("shortcode", "")
+            item_id, url, content_type = row["id"], row["url"], row["content_type"]
+            shortcode = row["shortcode"] if "shortcode" in row.keys() else ""
 
             # 1. Engage with the content (navigate, dwell, like, save)
             try:
@@ -577,11 +578,18 @@ class DaemonLoop:
 
             cur = await db.db.execute(
                 """SELECT COUNT(*) FROM accounts
-                   WHERE last_checked_at IS NULL
-                   OR last_checked_at < datetime('now', '-1 day')"""
-            )
+                WHERE last_checked_at IS NULL
+                OR last_checked_at < datetime('now', '-1 day')"""
+        )
             row = await cur.fetchone()
             stale = row[0] if row else 0
+
+            # Content engagement stats
+            cur = await db.db.execute(
+                "SELECT status, COUNT(*) as cnt FROM content_items GROUP BY status"
+        )
+            rows = await cur.fetchall()
+            content_str = ", ".join(f"{r['status']}={r['cnt']}" for r in rows) or "none"
 
             return {
                 "total_accounts": total_accounts,
@@ -591,6 +599,7 @@ class DaemonLoop:
                 "discovery_stats": disc_str,
                 "stale_accounts": stale,
                 "follow_back_rate": 0,
+                "content_items": content_str,
             }
         except Exception as e:
             logger.warning("Failed to gather stats: %s", e)
@@ -602,6 +611,7 @@ class DaemonLoop:
                 "discovery_stats": "none",
                 "stale_accounts": 0,
                 "follow_back_rate": 0,
+                "content_items": "none",
             }
 
     async def _call_llm(self, prompt: str) -> str | None:

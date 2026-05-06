@@ -52,12 +52,14 @@ class DaemonConfig(BaseModel):
 - Discovery success rates: {discovery_stats}
 - Accounts needing profile refresh: {stale_accounts}
 - Recent follow-back rate: {follow_back_rate}%
+- Content items by status: {content_items}
 
 Pick the next session's primary strategy and parameters. Options:
 - discovery (which strategy, what seeds/queries)
 - profiling (batch of accounts needing enrichment)
 - monitoring (re-check follower counts for tracked accounts)
 - engagement (like/follow to maintain organic appearance)
+- content_engagement (browse, like, save, and LLM-analyze content from tracked accounts)
 
 Respond in JSON: {{"strategy": "...", "params": {{...}}, "rationale": "..."}}"""
 

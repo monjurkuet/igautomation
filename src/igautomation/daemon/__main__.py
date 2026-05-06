@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
 
 from igautomation.daemon.loop import DaemonLoop
 from igautomation.daemon.strategies import DaemonConfig

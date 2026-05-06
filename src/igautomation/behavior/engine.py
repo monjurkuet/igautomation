@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import random
 import time
-from typing import Any, Callable
+from typing import Callable
 
 from igautomation.behavior.config import BehaviorConfig, SessionConfig
 from igautomation.cdp.client import CDPClient

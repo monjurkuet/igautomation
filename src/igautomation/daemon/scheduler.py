@@ -21,7 +21,6 @@ from __future__ import annotations
 import logging
 import random
 from datetime import datetime, timedelta, timezone
-from typing import Sequence
 
 from pydantic import BaseModel, Field
 
@@ -216,15 +215,22 @@ class SessionScheduler:
         """Enforce gaps between sessions with cluster logic.
 
         Clusters: with ``cluster_probability``, a short gap is allowed
-        (simulates checking phone repeatedly).  Otherwise, the minimum
+        (simulates checking phone repeatedly). Otherwise, the minimum
         gap is enforced by pushing the slot forward.
         """
         if not slots:
             return slots
 
-        # Day boundary — no session past this date
+        # Day boundary — no session past sleep_hour
         day = slots[0].date()
-        next_day = datetime(day.year, day.month, day.day, tzinfo=timezone.utc) + timedelta(days=1)
+        sleep_time = datetime(
+            day.year, day.month, day.day,
+            self._config.sleep_hour, 0, 0,
+            tzinfo=timezone.utc,
+        )
+        # Handle wrap-around: if sleep_hour < wake_hour, sleep is next day
+        if self._config.sleep_hour <= self._config.wake_hour:
+            sleep_time += timedelta(days=1)
 
         result: list[datetime] = [slots[0]]
 
@@ -236,7 +242,7 @@ class SessionScheduler:
                 # Decide: is this a cluster (short gap OK) or not?
                 if random.random() < self._config.cluster_probability:
                     # Cluster: allow the short gap as-is
-                    if slot < next_day:
+                    if slot < sleep_time:
                         result.append(slot)
                 else:
                     # Not a cluster — push forward to respect min_gap
@@ -245,10 +251,12 @@ class SessionScheduler:
                         self._config.max_gap_minutes,
                     )
                     new_slot = prev + timedelta(minutes=new_gap)
-                    if new_slot < next_day:
+                    if new_slot < sleep_time:
                         result.append(new_slot)
+                    elif slot < sleep_time:
+                        result.append(slot)
             else:
-                if slot < next_day:
+                if slot < sleep_time:
                     result.append(slot)
 
         # Cluster insertion can break sort order — re-sort

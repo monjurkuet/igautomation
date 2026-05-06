@@ -30,7 +30,6 @@ from typing import Annotated, Optional
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress
 from rich.table import Table
 
 from igautomation import __version__
@@ -43,10 +42,6 @@ from igautomation.scraper.analyzer import ProfileAnalyzer
 from igautomation.scraper.collector import AccountCollector
 from igautomation.cli_content import content_app, collections_app
 from igautomation.storage.store import CSVStore, JSONStore, SQLiteStore
-from igautomation.content.loader import load_csv
-from igautomation.content.models import ContentItem, ContentType, EngagementStatus
-from igautomation.content.analyzer import analyze_content, batch_analyze
-from igautomation.db.store import AsyncDatabaseStore
 
 app = typer.Typer(
     name="igx",
@@ -182,7 +177,6 @@ def discover(
     console.print(f"\n[bold green]Collected {len(accounts)} accounts[/bold green]")
 
     # Optional analysis
-    profile_data: list[dict] = []
     if analyze and accounts:
         console.print("\n[bold]Analyzing profiles...[/bold]")
         analyzer = ProfileAnalyzer(cdp)
@@ -206,7 +200,7 @@ def discover(
 
         # Print summary
         bd_models = ProfileAnalyzer.filter_bd_models(profiles)
-        console.print(f"\n[bold]Results:[/bold]")
+        console.print("\n[bold]Results:[/bold]")
         console.print(f"  Total collected: {len(accounts)}")
         console.print(f"  Verified (exist): {len(profiles)}")
         console.print(f"  BD/Model matches: {len(bd_models)}")

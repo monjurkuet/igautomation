@@ -11,8 +11,8 @@ from rich.table import Table
 
 from igautomation.cdp.discovery import TabDiscovery
 from igautomation.content.loader import load_csv
-from igautomation.content.models import ContentItem, ContentType, EngagementStatus
-from igautomation.content.analyzer import analyze_content, analyze_content_browse, batch_analyze
+from igautomation.content.models import ContentItem, ContentType
+from igautomation.content.analyzer import batch_analyze
 from igautomation.db.store import AsyncDatabaseStore
 
 console = Console()

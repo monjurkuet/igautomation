@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import csv
 import logging
-import re
 from pathlib import Path
 
 from igautomation.content.models import ContentItem, ContentType

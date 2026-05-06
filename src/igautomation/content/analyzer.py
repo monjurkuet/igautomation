@@ -14,12 +14,11 @@ import json
 import logging
 import os
 import random
-import re
 import time
 from typing import Any
 
 from igautomation.cdp.client import CDPClient
-from igautomation.content.models import ContentItem, ContentType
+from igautomation.content.models import ContentItem
 
 logger = logging.getLogger(__name__)
 
@@ -319,11 +318,8 @@ def analyze_content_browse(
     username = context.get("username", "")
     caption = context.get("caption", "")
     hashtags = context.get("hashtags", [])
-    mentions = context.get("mentions", [])
     likes = context.get("likes", "")
     alt_texts = context.get("alt_texts", [])
-    location = context.get("location", "")
-    is_reel = context.get("is_reel", False)
 
     logger.info(
         "Browsed %s — user=%s, caption=%d chars, hashtags=%d, likes=%s, alt=%d",

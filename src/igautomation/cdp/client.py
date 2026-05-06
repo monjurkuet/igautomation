@@ -119,7 +119,8 @@ class CDPClient:
                         "WebSocket connect failed (attempt %d), retrying in %.1fs",
                         attempt + 1, delay,
                     )
-                    import time; time.sleep(delay)
+                    import time
+                    time.sleep(delay)
                     ws = websocket.WebSocket()
                     ws.settimeout(30)
                 else:

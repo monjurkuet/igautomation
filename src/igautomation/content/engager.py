@@ -15,14 +15,12 @@ import json as _json
 import logging
 import random
 import time
-from typing import Any
 
 from igautomation.behavior.config import BehaviorConfig, SessionConfig
 from igautomation.behavior.engine import BehaviorEngine
 from igautomation.cdp.client import CDPClient
 from igautomation.content.models import (
-    ContentItem, ContentEngagementResult, EngagementAction,
-    EngagementStatus, ContentType,
+    ContentItem, ContentEngagementResult, EngagementStatus, ContentType,
 )
 from igautomation.db.store import AsyncDatabaseStore
 

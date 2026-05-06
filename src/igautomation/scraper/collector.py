@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 from igautomation.cdp.client import CDPClient, SKIP_USERNAMES
 from igautomation.cdp.discovery import TabDiscovery
