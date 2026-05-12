@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import yaml
 from pathlib import Path
 from pydantic import BaseModel
 from typing import Any
+
+from igautomation.llm_config import load_llm_config
+
+logger = logging.getLogger(__name__)
 
 
 class DaemonConfig(BaseModel):
@@ -39,7 +44,6 @@ class DaemonConfig(BaseModel):
         "search",
         "hashtags",
         "cascade",
-        "content_engagement",
     ]
 
     # LLM strategy planning
@@ -81,6 +85,27 @@ Respond in JSON: {{"strategy": "...", "params": {{...}}, "rationale": "..."}}"""
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w") as f:
             yaml.dump(self.model_dump(), f, default_flow_style=False)
+
+    def apply_llm_config_from_env(self) -> None:
+        """Load LLM credentials from environment / .env file if not already set.
+
+        Called by DaemonLoop.__init__() so all startup paths (CLI, python -m,
+        direct instantiation) benefit from centralized LLM config loading.
+        """
+        if self.llm_api_key:
+            return  # Already configured explicitly
+
+        llm_cfg = load_llm_config()
+        if llm_cfg.api_key:
+            self.llm_api_key = llm_cfg.api_key
+        if llm_cfg.base_url and llm_cfg.base_url != self.llm_base_url:
+            self.llm_base_url = llm_cfg.base_url
+        if llm_cfg.model:
+            self.llm_model = llm_cfg.model
+
+        if self.llm_api_key:
+            logger.info("LLM config loaded from environment (key=%s…, model=%s)",
+                         self.llm_api_key[:6], self.llm_model)
 
 
 # -----------------------------------------------------------------------

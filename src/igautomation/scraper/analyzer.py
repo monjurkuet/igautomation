@@ -344,6 +344,16 @@ class ProfileAnalyzer:
                     info.growth_status = "rising"
                     break
 
+        # Set category from keyword matches
+        if info.is_bd and info.is_model:
+            info.category = "bd_model"
+        elif info.is_bd:
+            info.category = "bd"
+        elif info.is_model:
+            info.category = "model"
+        else:
+            info.category = ""
+
         return info
 
     @staticmethod

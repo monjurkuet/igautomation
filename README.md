@@ -71,11 +71,14 @@ src/igautomation/
 | Strategy | How it works | Speed | Quality |
 |---|---|---|---|
 | `existing_tabs` | Scrape profile links from open Chrome tabs | ⚡ Instant | Low |
+| `feed_browse` | Browse the home feed and collect usernames from posts | ⚡ Fast | Medium |
+| `discover_people` | Fetch Instagram's Discover People suggestions | ⚡ Fast | High |
 | `shoutout_pages` | Visit BD shoutout pages, scroll, collect links | 🐢 Slow | Medium |
 | `graphql_suggestions` | Query IG's "Suggested for you" API | ⚡ Fast | High |
 | `search` | IG user search API | ⚡ Fast | Medium |
 | `hashtags` | Visit hashtag pages, collect from posts | 🐢 Slow | Medium |
 | `cascade` | For each account found, fetch THEIR suggestions | ⚡ Fast | Very High |
+| `content_engagement` | Browse/engage with content and optionally analyze it | ⚡ Fast | High |
 
 **Recommended**: `graphql_suggestions,cascade` — these two strategies combined can find 200+ related accounts in under 2 minutes.
 

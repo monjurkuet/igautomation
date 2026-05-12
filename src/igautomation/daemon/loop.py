@@ -37,8 +37,10 @@ from typing import Any
 
 from igautomation.behavior.config import BehaviorConfig
 from igautomation.behavior.engine import BehaviorEngine
+from igautomation.behavior.rate_limiter import RateLimiter
 from igautomation.cdp.client import CDPClient
 from igautomation.cdp.discovery import TabDiscovery
+from igautomation.daemon.scheduler import SessionScheduler, SessionScheduleConfig
 from igautomation.daemon.strategies import (
     DaemonConfig,
     FALLBACK_PLANS,
@@ -63,10 +65,15 @@ class DaemonLoop:
 
     def __init__(self, config: DaemonConfig | None = None) -> None:
         self.config = config or DaemonConfig()
+        self.config.apply_llm_config_from_env()
         self._running = False
         self._sessions_today = 0
         self._current_session_id: str | None = None
         self._plan_index = 0  # For cycling through fallback plans
+        self._sessions_since_analysis = 0  # For periodic auto-analysis
+        self._last_strategies: list[str] = []  # For diversity guard
+        self._scheduler = SessionScheduler()  # Human-like session timing
+        self._rate_limiter = RateLimiter()  # Exponential backoff for API calls
 
     # ------------------------------------------------------------------
     # Public API
@@ -143,14 +150,25 @@ class DaemonLoop:
                 await asyncio.sleep(skip_time)
                 continue
 
-            # Run one session
-            await self._run_one_session()
+            # Run one session (LLM picks strategy internally)
+            result = await self._run_one_session()
+            strategy_used = result.get("strategy", "unknown")
+            self._last_strategies.append(strategy_used)
+            # Keep only last 5 for diversity tracking
+            if len(self._last_strategies) > 5:
+                self._last_strategies.pop(0)
 
-            # Cooldown between sessions
-            cfg = BehaviorConfig()
-            cooldown = cfg.cooldown_seconds()
-            jitter = random.randint(-60, 120)  # ±2 min jitter
-            wait_time = max(60, cooldown + jitter)
+            # Auto-analysis every 5 sessions
+            self._sessions_since_analysis += 1
+            if self._sessions_since_analysis >= 5:
+                try:
+                    await self._run_auto_analysis()
+                except Exception as e:
+                    logger.warning("Auto-analysis failed: %s", e)
+                self._sessions_since_analysis = 0
+
+            # Use scheduler for human-like session timing
+            wait_time = self._scheduler.seconds_until_next()
             logger.info("Session cooldown — %d min", wait_time // 60)
             await asyncio.sleep(wait_time)
 
@@ -287,28 +305,34 @@ class DaemonLoop:
         strategies = plan.params.get("strategies", self.config.default_strategies)
         seeds = plan.params.get("seeds", [])
 
-        before = len(collector.accounts)
         accounts = collector.collect(
             seed_usernames=seeds,
             target_count=target,
             strategies=strategies,
         )
-        new_count = len(accounts) - before
 
-        # Save discovered accounts to DB
+        # Save discovered accounts to DB — track how many are truly new
+        discovered_count = 0
+        query_info = json.dumps({"sub_strategies": strategies, "seeds": seeds})
+
         for username in accounts:
             try:
+                # Check if account already exists to count only truly new
+                existing = await db.get_account_by_username(username)
+                is_new = existing is None
                 account_id = await db.upsert_account({"username": username})
                 await db.add_discovery_event(
                     account_id=account_id,
                     strategy=plan.strategy,
                     source_username=seeds[0] if seeds else None,
-                    query_text=json.dumps(plan.params),
+                    query_text=query_info,
                 )
+                if is_new:
+                    discovered_count += 1
             except Exception as e:
                 logger.debug("Failed to save %s: %s", username, e)
 
-        stats["accounts_discovered"] = new_count
+        stats["accounts_discovered"] = discovered_count
         stats["actions_taken"] = (
             engine._session.likes_used + engine._session.follows_used +
             engine._session.profile_views_used + engine._session.searches_used
@@ -330,8 +354,15 @@ class DaemonLoop:
         usernames = [a["username"] for a in unanalyzed]
         logger.info("Profiling %d accounts", len(usernames))
 
+        await self._rate_limiter.acquire()
         analyzer = ProfileAnalyzer(cdp, graphql, engine)
-        profiles = analyzer.analyze(usernames)
+        loop = asyncio.get_running_loop()
+        try:
+            profiles = await loop.run_in_executor(None, analyzer.analyze, usernames)
+            self._rate_limiter.record_success()
+        except Exception:
+            self._rate_limiter.record_error("profile_api")
+            raise
 
         for profile in profiles:
             try:
@@ -353,6 +384,14 @@ class DaemonLoop:
 
         stats["accounts_profiled"] = len(profiles)
         stats["actions_taken"] = engine._session.profile_views_used
+
+        # Compute growth status from any accumulated snapshots
+        try:
+            growth_counts = await db.refresh_growth_for_all()
+            if growth_counts:
+                logger.info("Growth status recomputed after profiling: %s", growth_counts)
+        except Exception as e:
+            logger.debug("Growth recomputation failed after profiling: %s", e)
 
     async def _execute_monitoring(
         self, cdp: CDPClient, graphql: GraphQLClient, engine: BehaviorEngine,
@@ -378,7 +417,16 @@ class DaemonLoop:
                 break
 
             account_id, username, _old_count = row["id"], row["username"], row["follower_count"]
-            profile_data = graphql.get_web_profile_info(username)
+
+            await self._rate_limiter.acquire()
+            loop = asyncio.get_running_loop()
+            try:
+                profile_data = await loop.run_in_executor(None, graphql.get_web_profile_info, username)
+                self._rate_limiter.record_success()
+            except Exception:
+                self._rate_limiter.record_error("profile_api")
+                continue
+
             if not profile_data:
                 continue
 
@@ -408,33 +456,41 @@ class DaemonLoop:
 
         stats["accounts_monitored"] = len(rows)
 
+        # Compute growth status from accumulated snapshots
+        try:
+            growth_counts = await db.refresh_growth_for_all()
+            logger.info("Growth status recomputed: %s", growth_counts)
+        except Exception as e:
+            logger.debug("Growth recomputation failed: %s", e)
+
     async def _execute_engagement(
         self, cdp: CDPClient, graphql: GraphQLClient, engine: BehaviorEngine,
         db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     ) -> None:
         """Like/follow a few accounts to maintain organic appearance."""
-        max_likes = plan.params.get("max_likes", 5)
         max_follows = plan.params.get("max_follows", 2)
+        max_profile_views = plan.params.get("max_profile_views", 5)
 
-        # Get some interesting accounts we haven't interacted with yet
+        # Get accounts with no prior interaction — prefer those with data
         cur = await db.db.execute(
             """SELECT a.id, a.username FROM accounts a
                LEFT JOIN interaction_log il ON a.id = il.account_id
-               WHERE il.id IS NULL AND a.tier IS NOT NULL
-               ORDER BY a.follower_count DESC LIMIT 20""",
+               WHERE il.id IS NULL
+               ORDER BY COALESCE(a.follower_count, 0) DESC, a.last_checked_at ASC
+               LIMIT 20""",
         )
         rows = await cur.fetchall()
         if not rows:
             logger.info("No accounts for engagement")
             return
 
-        likes_done = 0
         follows_done = 0
+        views_done = 0
 
         for row in rows:
             if engine._session.is_exhausted():
                 break
-            if likes_done >= max_likes and follows_done >= max_follows:
+            if follows_done >= max_follows and views_done >= max_profile_views:
                 break
 
             account_id, username = row["id"], row["username"]
@@ -447,9 +503,10 @@ class DaemonLoop:
                 stats["actions_taken"] += 1
 
             # Occasionally view profile (organic)
-            if engine.can_view_profile() and random.random() < 0.5:
+            if views_done < max_profile_views and engine.can_view_profile() and random.random() < 0.5:
                 engine.view_profile(username)
                 await db.log_interaction(account_id, "view_profile", username, self._current_session_id)
+                views_done += 1
                 stats["actions_taken"] += 1
 
         # Scroll feed for organic behavior
@@ -471,7 +528,7 @@ class DaemonLoop:
         # Get pending content items from DB
         cur = await db.db.execute(
             """SELECT id, url, content_type, shortcode FROM content_items
-            WHERE status = 'pending' OR status = 'loaded'
+            WHERE engagement_status IN ('pending', 'analyzed')
             ORDER BY RANDOM() LIMIT ?""",
             (max_items,),
         )
@@ -496,6 +553,9 @@ class DaemonLoop:
                 item = ContentItem(url=url, content_type=ct, shortcode=shortcode or "")
                 result = engager.engage_content(item)
                 stats["actions_taken"] += 1
+
+                # Log engagement results to DB
+                await engager.log_engagement(item, result, session_id=self._current_session_id)
 
                 # Determine overall engagement status
                 if result.error:
@@ -529,6 +589,16 @@ class DaemonLoop:
                         })
                         stats["actions_taken"] += 1
                         logger.info("Analyzed content %s — category=%s", shortcode, analyzed_item.category or "?")
+
+                    # Link to collection if suggested
+                    collection_name = (analyzed_item.llm_collection_suggestion or "").strip()
+                    if collection_name:
+                        try:
+                            collection_id = await db.upsert_collection(name=collection_name)
+                            await db.add_content_to_collection(item_id, collection_id)
+                            logger.info("Linked content %s → collection '%s'", shortcode, collection_name)
+                        except Exception as ce:
+                            logger.debug("Collection link failed for %s: %s", shortcode, ce)
                 except Exception as e:
                     logger.warning("Content analysis failed for %s: %s", url, e)
 
@@ -586,10 +656,10 @@ class DaemonLoop:
 
             # Content engagement stats
             cur = await db.db.execute(
-                "SELECT status, COUNT(*) as cnt FROM content_items GROUP BY status"
-        )
+                "SELECT engagement_status, COUNT(*) as cnt FROM content_items GROUP BY engagement_status"
+            )
             rows = await cur.fetchall()
-            content_str = ", ".join(f"{r['status']}={r['cnt']}" for r in rows) or "none"
+            content_str = ", ".join(f"{r['engagement_status']}={r['cnt']}" for r in rows) or "none"
 
             return {
                 "total_accounts": total_accounts,
@@ -643,12 +713,55 @@ class DaemonLoop:
             logger.warning("LLM API call failed: %s", e)
             return None
 
+    async def _run_auto_analysis(self) -> None:
+        """Run automatic quality review analysis and save to DB.
+
+        Triggered every 5 sessions to give the daemon self-awareness
+        of data quality, coverage gaps, and stale accounts.
+        """
+        try:
+            from igautomation.analysis.analyzer import AnalysisEngine
+
+            engine = AnalysisEngine(
+                db_path=self.config.db_path,
+                llm_base_url=self.config.llm_base_url,
+                llm_api_key=self.config.llm_api_key,
+                llm_model=self.config.llm_model,
+            )
+            result = await engine.run_quality_review()
+            if result and result.summary:
+                await engine.save_result(result)
+                logger.info("Auto-analysis complete: %s (%d findings)",
+                             result.summary[:60], len(result.findings))
+        except Exception as e:
+            logger.debug("Auto-analysis skipped: %s", e)
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
     def _get_fallback_plan(self) -> SessionPlan:
-        """Cycle through fallback plans when LLM is unavailable."""
+        """Cycle through fallback plans when LLM is unavailable.
+
+        If the last 3+ sessions all used the same strategy, skip ahead
+        to force diversity.
+        """
+        if len(self._last_strategies) >= 3:
+            last = self._last_strategies[-1]
+            prev_two = self._last_strategies[-3:]
+            same_count = sum(1 for s in prev_two if s == last)
+            if same_count >= 3:
+                logger.info("Diversity guard: last 3 sessions all %s — cycling",
+                            last)
+                # Advance until we land on a different strategy
+                attempts = 0
+                while attempts < len(FALLBACK_PLANS):
+                    self._plan_index += 1
+                    candidate = FALLBACK_PLANS[self._plan_index % len(FALLBACK_PLANS)]
+                    attempts += 1
+                    if candidate.strategy != last:
+                        return candidate
+
         plan = FALLBACK_PLANS[self._plan_index % len(FALLBACK_PLANS)]
         self._plan_index += 1
         return plan

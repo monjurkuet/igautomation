@@ -27,7 +27,7 @@ class TestDaemonConfig:
         assert cfg.sleep_hours_end == 1
         assert cfg.skip_session_probability == 0.15
         assert cfg.llm_enabled is True
-        assert len(cfg.default_strategies) == 9
+        assert len(cfg.default_strategies) == 8
 
     def test_custom_values(self):
         cfg = DaemonConfig(db_path="test.db", cdp_port=9225, llm_enabled=False)

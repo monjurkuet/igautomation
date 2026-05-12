@@ -217,9 +217,14 @@ class SessionScheduler:
         Clusters: with ``cluster_probability``, a short gap is allowed
         (simulates checking phone repeatedly). Otherwise, the minimum
         gap is enforced by pushing the slot forward.
+
+        The input slots are sorted first, then normalized in order so that
+        later adjustments cannot reintroduce illegal gaps.
         """
         if not slots:
             return slots
+
+        slots = sorted(slots)
 
         # Day boundary — no session past sleep_hour
         day = slots[0].date()
@@ -232,34 +237,37 @@ class SessionScheduler:
         if self._config.sleep_hour <= self._config.wake_hour:
             sleep_time += timedelta(days=1)
 
-        result: list[datetime] = [slots[0]]
+        result: list[datetime] = []
+        prev = None
 
-        for slot in slots[1:]:
-            prev = result[-1]
-            gap = (slot - prev).total_seconds() / 60.0  # minutes
+        for slot in slots:
+            if slot >= sleep_time:
+                continue
 
-            if gap < self._config.min_gap_minutes:
-                # Decide: is this a cluster (short gap OK) or not?
-                if random.random() < self._config.cluster_probability:
-                    # Cluster: allow the short gap as-is
-                    if slot < sleep_time:
-                        result.append(slot)
-                else:
-                    # Not a cluster — push forward to respect min_gap
-                    new_gap = random.uniform(
-                        self._config.min_gap_minutes,
-                        self._config.max_gap_minutes,
-                    )
-                    new_slot = prev + timedelta(minutes=new_gap)
-                    if new_slot < sleep_time:
-                        result.append(new_slot)
-                    elif slot < sleep_time:
-                        result.append(slot)
-            else:
-                if slot < sleep_time:
-                    result.append(slot)
+            candidate = slot
+            if prev is not None:
+                gap = (candidate - prev).total_seconds() / 60.0
+                if gap < self._config.min_gap_minutes:
+                    if random.random() < self._config.cluster_probability:
+                        tight_gap = min(
+                            self._config.cluster_gap_minutes,
+                            max(1, self._config.min_gap_minutes - 1),
+                        )
+                        candidate = prev + timedelta(minutes=tight_gap)
+                        if candidate >= sleep_time:
+                            break
+                    else:
+                        candidate = prev + timedelta(
+                            minutes=random.uniform(
+                                self._config.min_gap_minutes,
+                                self._config.max_gap_minutes,
+                            )
+                        )
+                        if candidate >= sleep_time:
+                            break
 
-        # Cluster insertion can break sort order — re-sort
-        result.sort()
+            result.append(candidate)
+            prev = candidate
+
         return result
 

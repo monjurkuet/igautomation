@@ -27,6 +27,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from igautomation.db.store import AsyncDatabaseStore
+from igautomation.llm_config import load_llm_config
 
 logger = logging.getLogger(__name__)
 
@@ -162,13 +163,21 @@ class AnalysisEngine:
         llm_model: str = "gpt-5.4-mini",
     ) -> None:
         self.db_path = db_path
-        self.llm_base_url = llm_base_url or os.environ.get(
-            "LLM_BASE_URL", "https://llm.datasolved.org/v1"
-        )
-        self.llm_api_key = llm_api_key or os.environ.get(
-            "LLM_API_KEY", os.environ.get("OPENAI_API_KEY", "")
-        )
-        self.llm_model = llm_model
+        # Fall through to centralized loader if neither passed nor in env
+        if not (llm_api_key or llm_base_url or llm_model) or \
+           not (llm_api_key and llm_base_url):
+            llm_cfg = load_llm_config()
+            self.llm_base_url = llm_base_url or llm_cfg.base_url
+            self.llm_api_key = llm_api_key or llm_cfg.api_key
+            self.llm_model = llm_model or llm_cfg.model
+        else:
+            self.llm_base_url = llm_base_url or os.environ.get(
+                "LLM_BASE_URL", "https://llm.datasolved.org/v1"
+            )
+            self.llm_api_key = llm_api_key or os.environ.get(
+                "LLM_API_KEY", os.environ.get("OPENAI_API_KEY", "")
+            )
+            self.llm_model = llm_model
 
     # ------------------------------------------------------------------
     # Public API

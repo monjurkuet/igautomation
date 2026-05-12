@@ -40,38 +40,8 @@ def main() -> None:
     )
 
     cfg = DaemonConfig.from_yaml(args.config) if args.config else DaemonConfig()
-    if args.db and args.db != "igautomation.db":
-        # CLI override takes precedence
+    if args.db:
         cfg = cfg.model_copy(update={"db_path": args.db})
-
-    # Auto-load LLM API key from environment if not set in config
-    if not cfg.llm_api_key:
-        import os
-        key = os.environ.get("OPENPAI_API_KEY", "")
-        base_url = os.environ.get("OPENPAI_BASE_URL", "")
-        if not key:
-            # Fallback: scan .env file
-            from pathlib import Path
-            env_path = Path(cfg.db_path).parent / ".env"
-            if env_path.exists():
-                for line in env_path.read_text().splitlines():
-                    line = line.strip()
-                    if line.startswith("#") or "=" not in line:
-                        continue
-                    k, v = line.split("=", 1)
-                    k, v = k.strip(), v.strip().strip('"').strip("'")
-                    if k == "OPENPAI_API_KEY":
-                        key = v
-                    elif k == "OPENPAI_BASE_URL":
-                        base_url = v
-        updates = {}
-        if key:
-            updates["llm_api_key"] = key
-        if base_url:
-            updates["llm_base_url"] = base_url
-        if updates:
-            cfg = cfg.model_copy(update=updates)
-            logging.getLogger(__name__).info("LLM config loaded from environment")
 
     daemon = DaemonLoop(cfg)
 

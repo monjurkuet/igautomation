@@ -154,10 +154,10 @@ igx analyze --input output/accounts.json    # Enrich & verify profiles
 7. **Manual JS string escaping** in `_fetch_graphql()` — fragile, potential injection risk
 8. **Hard-coded 500-account limit** in `scrape_shoutout_pages()` — not configurable
 9. **Keyword matching false positives** — short keywords like "bd", "ctg" could match unintended text
-10. ~~**No tests**~~ — **FIXED**: 119 tests passing across 6 test files
+157. ~~**No tests**~~ — **FIXED**: 119 tests passing across 8 test files
 11. ~~**No venv**~~ — **FIXED**: uv venv at .venv/ with all deps
 12. ~~**SQLite no `updated_at`**~~ — **FIXED**: AsyncDatabaseStore has proper timestamps
-13. ~~**No indexing**~~ — **FIXED**: 11 indexes on the new schema
+160. ~~**No indexing**~~ — **FIXED**: 21 indexes on the new schema
 
 ## Chrome Debug Port Conventions
 
@@ -221,9 +221,9 @@ Full plan at `docs/plans/2026-05-05-organic-ig-intelligence.md` — 7 phases, 14
 ### analysis/analyzer.py — `AnalysisEngine`
 
 - Async LLM-driven analysis on collected data.
-- Methods: `gather_stats()`, `run_data_quality()`, `run_strategy_optimization()`, `run_tier_adjustment()`.
+- Methods: `run_quality_review()`, `run_strategy_optimization()`, `run_tier_analysis()`, `run_all().`
 - Returns `AnalysisResult` (summary, findings, recommendations, metrics).
-- `save_result()` writes to `session_analyses` table via `AsyncDatabaseStore.add_session_analysis()`.
+- `save_result()` writes to `analysis_log` via `AsyncDatabaseStore.add_session_analysis()`.
 
 ### behavior/rate_limiter.py — `RateLimiter`
 
@@ -243,11 +243,11 @@ Full plan at `docs/plans/2026-05-05-organic-ig-intelligence.md` — 7 phases, 14
 - Session management: `create_session()`, `end_session()`, `get_status()`.
 - Random skip probability (0.1) + cooldown jitter per strategy.
 
-### daemon/strategies.py — `DaemonConfig` + strategy functions
+### daemon/strategies.py — `DaemonConfig` + `SessionPlan` + fallback plans
 
-- `DaemonConfig` (dataclass): db_path, behavior_config, strategies, session_duration, skip_probability, cooldown_range.
+- `DaemonConfig` (Pydantic BaseModel): db_path, cdp_port, llm_base_url, llm_api_key, llm_model, max_sessions_per_day, sleep_hours_start/end, skip_session_probability, default_target_count, default_strategies, llm_enabled, llm_planning_prompt.
 - `from_yaml(path)` classmethod for config files.
-- Strategy functions: `run_discovery()`, `run_profiling()`, `run_monitoring()`, `run_engagement()`.
+- `SessionPlan` stores `strategy`, `params`, and `rationale`; `FALLBACK_PLANS` provides default session plans when the LLM is unavailable.
 
 ### daemon/scheduler.py — `SessionScheduler`
 

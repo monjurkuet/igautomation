@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import random
 import time
 from typing import Any
@@ -24,45 +23,14 @@ logger = logging.getLogger(__name__)
 
 
 def _get_llm_config() -> tuple[str, str, str]:
-    """Read LLM config from system environment. Returns (api_key, base_url, model).
+    """Read LLM config from the centralized loader."""
+    from igautomation.llm_config import load_llm_config
 
-    Sources vars from os.environ (set via ~/.bashrc or systemd Environment=).
-    Falls back to a .env file only if env vars are missing.
-    """
-    # Try environment first (always works when run from a login shell)
-    api_key = os.environ.get("OPENPAI_API_KEY", "")
-    base_url = os.environ.get("OPENPAI_BASE_URL", "")
-    model = os.environ.get("LLM_MODEL", "")
-
-    # Fallback: scan .env file in project root
-    if not api_key or not base_url:
-        this_dir = os.path.dirname(os.path.abspath(__file__))
-        for _ in range(5):
-            candidate = os.path.join(this_dir, ".env")
-            if os.path.exists(candidate):
-                with open(candidate) as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line or line.startswith("#") or "=" not in line:
-                            continue
-                        k, _, v = line.partition("=")
-                        k, v = k.strip(), v.strip().strip('"').strip("'")
-                        if k == "OPENPAI_API_KEY" and not api_key:
-                            api_key = v
-                        elif k == "OPENPAI_BASE_URL" and not base_url:
-                            base_url = v
-                        elif k == "LLM_MODEL" and not model:
-                            model = v
-                break
-            this_dir = os.path.dirname(this_dir)
-
-    if not base_url:
-        base_url = "https://llm.datasolved.org/v1/"
-    if not model:
-        model = "gemini-2.5-flash-lite"
+    cfg = load_llm_config()
+    base_url = cfg.base_url
     if base_url and not base_url.endswith("/"):
         base_url += "/"
-    return api_key, base_url, model
+    return cfg.api_key, base_url, cfg.model
 
 
 def extract_page_context(cdp: CDPClient) -> dict[str, Any]:
@@ -410,10 +378,10 @@ Respond with ONLY valid JSON, no other text."""
 
         analysis = json.loads(content)
         item.llm_analysis = analysis.get("analysis", "")
-        item.llm_collection_suggestion = analysis.get("collection", "")
+        item.llm_collection_suggestion = (analysis.get("collection", "") or "").strip().lower()
         item.llm_tags = analysis.get("tags", [])
         item.is_bd_relevant = analysis.get("is_bd_relevant", False)
-        item.content_niche = analysis.get("content_niche", "")
+        item.content_niche = (analysis.get("content_niche", "") or "").strip().lower()
 
         # Also store the extracted context
         item.notes = item.notes or ""
@@ -428,7 +396,7 @@ Respond with ONLY valid JSON, no other text."""
     except Exception as exc:
         logger.warning("LLM analysis failed for %s: %s", item.url, exc)
         if item.category:
-            item.llm_collection_suggestion = f"BD {item.category}"
+            item.llm_collection_suggestion = (f"BD {item.category}").strip().lower()
         item.llm_analysis = f"LLM analysis unavailable: {exc}"
         # Still keep extracted context
         if username:
@@ -445,7 +413,7 @@ def analyze_content(item: ContentItem) -> ContentItem:
     if not api_key:
         logger.warning("No LLM API key found — skipping content analysis")
         if item.category:
-            item.llm_collection_suggestion = f"BD {item.category}"
+            item.llm_collection_suggestion = (f"BD {item.category}").strip().lower()
         return item
 
     prompt = f"""Analyze this Instagram content for an influencer intelligence platform focused on Bangladesh.
@@ -495,15 +463,15 @@ Respond with ONLY valid JSON, no other text."""
 
         analysis = json.loads(content)
         item.llm_analysis = analysis.get("analysis", "")
-        item.llm_collection_suggestion = analysis.get("collection", "")
+        item.llm_collection_suggestion = (analysis.get("collection", "") or "").strip().lower()
         item.llm_tags = analysis.get("tags", [])
         item.is_bd_relevant = analysis.get("is_bd_relevant", False)
-        item.content_niche = analysis.get("content_niche", "")
+        item.content_niche = (analysis.get("content_niche", "") or "").strip().lower()
 
     except Exception as exc:
         logger.warning("LLM analysis failed for %s: %s", item.url, exc)
         if item.category:
-            item.llm_collection_suggestion = f"BD {item.category}"
+            item.llm_collection_suggestion = (f"BD {item.category}").strip().lower()
 
     return item
 
