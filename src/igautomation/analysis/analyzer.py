@@ -160,25 +160,13 @@ class AnalysisEngine:
         db_path: str = "igautomation.db",
         llm_base_url: str | None = None,
         llm_api_key: str | None = None,
-        llm_model: str = "gpt-5.4-mini",
+        llm_model: str | None = None,
     ) -> None:
         self.db_path = db_path
-        # Fall through to centralized loader if neither passed nor in env
-        if not (llm_api_key or llm_base_url or llm_model) or \
-           not (llm_api_key and llm_base_url):
-            llm_cfg = load_llm_config()
-            self.llm_base_url = llm_base_url or llm_cfg.base_url
-            self.llm_api_key = llm_api_key or llm_cfg.api_key
-            self.llm_model = llm_model or llm_cfg.model
-        else:
-            self.llm_base_url = llm_base_url or os.environ.get(
-                "LLM_BASE_URL", "https://llm.datasolved.org/v1"
-            )
-            self.llm_api_key = llm_api_key or os.environ.get(
-                "LLM_API_KEY", os.environ.get("OPENAI_API_KEY", "")
-            )
-            self.llm_model = llm_model
-
+        llm_cfg = load_llm_config()
+        self.llm_base_url = llm_base_url or llm_cfg.base_url
+        self.llm_api_key = llm_api_key or llm_cfg.api_key
+        self.llm_model = llm_model or llm_cfg.model
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -339,6 +327,7 @@ class AnalysisEngine:
             ],
             "max_tokens": 1000,
             "temperature": 0.7,
+            "stream": False,
         }).encode()
 
         headers = {
@@ -349,8 +338,18 @@ class AnalysisEngine:
         req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read())
-                return data["choices"][0]["message"]["content"]
+                raw = resp.read().decode("utf-8")
+                data = json.loads(raw)
+                # Handle both streaming and non-streaming responses
+                if "choices" in data and data["choices"]:
+                    choice = data["choices"][0]
+                    # Non-streaming: message.content
+                    if "message" in choice:
+                        return choice["message"]["content"]
+                    # Streaming fallback (shouldn't happen with stream=False)
+                    if "delta" in choice:
+                        return choice["delta"].get("content", "")
+                raise RuntimeError(f"Unexpected LLM response structure: {raw[:200]}")
         except Exception as e:
             logger.error("LLM API call failed: %s", e)
             raise

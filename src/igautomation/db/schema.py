@@ -185,71 +185,108 @@ MIGRATIONS: list[tuple[str, str]] = [
     (
         "003_content_tables",
         """
-        CREATE TABLE IF NOT EXISTS content_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            url TEXT UNIQUE NOT NULL,
-            shortcode TEXT,
-            content_type TEXT DEFAULT 'unknown',
-            owner_username TEXT,
-            owner_id TEXT,
-            caption TEXT,
-            hashtags TEXT,
-            mentions TEXT,
-            media_type TEXT,
-            video_url TEXT,
-            video_view_count INTEGER,
-            video_play_count INTEGER,
-            like_count INTEGER,
-            comment_count INTEGER,
-            timestamp TEXT,
-            llm_analysis TEXT,
-            llm_collection_suggestion TEXT,
-            llm_tags TEXT,
-            is_bd_relevant INTEGER DEFAULT 0,
-            content_niche TEXT,
-            priority INTEGER DEFAULT 5,
-            category TEXT DEFAULT '',
-            notes TEXT DEFAULT '',
-            engagement_status TEXT DEFAULT 'pending',
-            first_seen_at TEXT DEFAULT (datetime('now')),
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now'))
-        );
-        CREATE TABLE IF NOT EXISTS content_engagement_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            content_item_id INTEGER NOT NULL REFERENCES content_items(id),
-            action_type TEXT NOT NULL,
-            status TEXT NOT NULL,
-            detail TEXT,
-            session_id TEXT,
-            performed_at TEXT DEFAULT (datetime('now'))
-        );
-        CREATE TABLE IF NOT EXISTS collections (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            collection_id TEXT,
-            description TEXT DEFAULT '',
-            cover_media_id TEXT,
-            item_count INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now'))
-        );
-        CREATE TABLE IF NOT EXISTS content_collections (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            content_item_id INTEGER NOT NULL REFERENCES content_items(id),
-            collection_id INTEGER NOT NULL REFERENCES collections(id),
-            added_at TEXT DEFAULT (datetime('now')),
-            UNIQUE(content_item_id, collection_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_content_items_url ON content_items(url);
-        CREATE INDEX IF NOT EXISTS idx_content_items_type ON content_items(content_type);
-        CREATE INDEX IF NOT EXISTS idx_content_items_niche ON content_items(content_niche);
-        CREATE INDEX IF NOT EXISTS idx_content_items_engagement ON content_items(engagement_status);
-        CREATE INDEX IF NOT EXISTS idx_content_engagement_item ON content_engagement_log(content_item_id);
-        CREATE INDEX IF NOT EXISTS idx_content_engagement_type ON content_engagement_log(action_type);
-        CREATE INDEX IF NOT EXISTS idx_collections_name ON collections(name);
-        CREATE INDEX IF NOT EXISTS idx_content_collections_item ON content_collections(content_item_id);
-        CREATE INDEX IF NOT EXISTS idx_content_collections_collection ON content_collections(collection_id);
-        """,
+CREATE TABLE IF NOT EXISTS content_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  url TEXT UNIQUE NOT NULL,
+  shortcode TEXT,
+  content_type TEXT DEFAULT 'unknown',
+  owner_username TEXT,
+  owner_id TEXT,
+  caption TEXT,
+  hashtags TEXT,
+  mentions TEXT,
+  media_type TEXT,
+  video_url TEXT,
+  video_view_count INTEGER,
+  video_play_count INTEGER,
+  like_count INTEGER,
+  comment_count INTEGER,
+  timestamp TEXT,
+  llm_analysis TEXT,
+  llm_collection_suggestion TEXT,
+  llm_tags TEXT,
+  is_bd_relevant INTEGER DEFAULT 0,
+  content_niche TEXT,
+  priority INTEGER DEFAULT 5,
+  category TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  engagement_status TEXT DEFAULT 'pending',
+  first_seen_at TEXT DEFAULT (datetime('now')),
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS content_engagement_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  content_item_id INTEGER NOT NULL REFERENCES content_items(id),
+  action_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  detail TEXT,
+  session_id TEXT,
+  performed_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS collections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  collection_id TEXT,
+  description TEXT DEFAULT '',
+  cover_media_id TEXT,
+  item_count INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS content_collections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  content_item_id INTEGER NOT NULL REFERENCES content_items(id),
+  collection_id INTEGER NOT NULL REFERENCES collections(id),
+  added_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(content_item_id, collection_id)
+);
+CREATE INDEX IF NOT EXISTS idx_content_items_url ON content_items(url);
+CREATE INDEX IF NOT EXISTS idx_content_items_type ON content_items(content_type);
+CREATE INDEX IF NOT EXISTS idx_content_items_niche ON content_items(content_niche);
+CREATE INDEX IF NOT EXISTS idx_content_items_engagement ON content_items(engagement_status);
+CREATE INDEX IF NOT EXISTS idx_content_engagement_item ON content_engagement_log(content_item_id);
+CREATE INDEX IF NOT EXISTS idx_content_engagement_type ON content_engagement_log(action_type);
+CREATE INDEX IF NOT EXISTS idx_collections_name ON collections(name);
+CREATE INDEX IF NOT EXISTS idx_content_collections_item ON content_collections(content_item_id);
+CREATE INDEX IF NOT EXISTS idx_content_collections_collection ON content_collections(collection_id);
+""",
+    ),
+    (
+        "004_ig_accounts_and_session_link",
+        """
+CREATE TABLE IF NOT EXISTS ig_accounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  port INTEGER UNIQUE NOT NULL,
+  username TEXT,
+  user_id TEXT,
+  full_name TEXT,
+  profile_pic_url TEXT,
+  is_private INTEGER DEFAULT 0,
+  is_verified INTEGER DEFAULT 0,
+  follower_count INTEGER DEFAULT 0,
+  follower_snapshot_at TEXT,
+  status TEXT DEFAULT 'active',
+  last_used_at TEXT,
+  daily_session_count INTEGER DEFAULT 0,
+  daily_reset_at TEXT,
+  cooldown_until TEXT,
+  preferred_strategies TEXT,
+  warmup_complete INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ig_accounts_port ON ig_accounts(port);
+CREATE INDEX IF NOT EXISTS idx_ig_accounts_status ON ig_accounts(status);
+ALTER TABLE sessions ADD COLUMN ig_account_id INTEGER REFERENCES ig_accounts(id);
+""",
+    ),
+    (
+        "005_ig_account_extras",
+        """
+ALTER TABLE ig_accounts ADD COLUMN cooldown_until TEXT;
+ALTER TABLE ig_accounts ADD COLUMN preferred_strategies TEXT;
+ALTER TABLE ig_accounts ADD COLUMN warmup_complete INTEGER DEFAULT 0;
+""",
     ),
 ]

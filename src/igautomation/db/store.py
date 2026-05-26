@@ -565,6 +565,16 @@ class AsyncDatabaseStore:
         )
         await self.db.commit()
 
+    async def update_content_engagement_status_by_url(
+        self, url: str, engagement_status: str
+    ) -> None:
+        """Update the engagement_status of a content item by URL."""
+        await self.db.execute(
+            "UPDATE content_items SET engagement_status = ?, updated_at = ? WHERE url = ?",
+            (engagement_status, _now(), url),
+        )
+        await self.db.commit()
+
     # ------------------------------------------------------------------
     # collections
     # ------------------------------------------------------------------
@@ -634,7 +644,9 @@ class AsyncDatabaseStore:
         return dict(row) if row else None
 
     async def add_content_to_collection(
-        self, content_item_id: int, collection_id: int
+        self,
+        content_item_id: int,
+        collection_id: int,
     ) -> int:
         """Add a content item to a collection. Returns the mapping id."""
         try:
@@ -656,3 +668,202 @@ class AsyncDatabaseStore:
         except Exception:
             # Already exists — ignore
             return 0
+
+    # ------------------------------------------------------------------
+    # ig_accounts (our own IG accounts tracked per CDP port)
+    # ------------------------------------------------------------------
+
+    async def upsert_ig_account(self, data: dict[str, Any]) -> int:
+        """Insert or update an IG account by port. Returns the ig_account id."""
+        now = _now()
+        port = data["port"]
+
+        cur = await self.db.execute(
+            "SELECT id FROM ig_accounts WHERE port = ?", (port,)
+        )
+        row = await cur.fetchone()
+
+        if row:
+            ig_id = row[0]
+            update_fields = []
+            update_values: list[Any] = []
+            for key in (
+                "username", "user_id", "full_name", "profile_pic_url",
+                "is_private", "is_verified", "follower_count",
+                "follower_snapshot_at", "status", "last_used_at",
+                "daily_session_count", "daily_reset_at",
+                "cooldown_until", "preferred_strategies", "warmup_complete",
+            ):
+                if key in data:
+                    update_fields.append(f"{key} = ?")
+                    update_values.append(data[key])
+            update_fields.append("updated_at = ?")
+            update_values.append(now)
+            update_values.append(ig_id)
+
+            if update_fields:
+                await self.db.execute(
+                    f"UPDATE ig_accounts SET {', '.join(update_fields)} WHERE id = ?",
+                    update_values,
+                )
+                await self.db.commit()
+            return ig_id
+
+        # INSERT
+        fields = ["port", "created_at", "updated_at"]
+        values: list[Any] = [port, now, now]
+        for key in (
+            "username", "user_id", "full_name", "profile_pic_url",
+            "is_private", "is_verified", "follower_count",
+            "follower_snapshot_at", "status", "last_used_at",
+            "daily_session_count", "daily_reset_at",
+            "cooldown_until", "preferred_strategies", "warmup_complete",
+        ):
+            if key in data:
+                fields.append(key)
+                values.append(data[key])
+
+        placeholders = ", ".join("?" for _ in values)
+        cols = ", ".join(fields)
+        cur = await self.db.execute(
+            f"INSERT INTO ig_accounts ({cols}) VALUES ({placeholders})", values
+        )
+        await self.db.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    async def get_ig_account_by_port(self, port: int) -> dict | None:
+        """Return IG account dict by CDP port, or None."""
+        cur = await self.db.execute(
+            "SELECT * FROM ig_accounts WHERE port = ?", (port,)
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def get_all_ig_accounts(self) -> list[dict]:
+        """Return all tracked IG accounts."""
+        cur = await self.db.execute(
+            "SELECT * FROM ig_accounts ORDER BY port"
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_available_ig_accounts(self) -> list[dict]:
+        """Return IG accounts eligible for daemon use (status = active or sleeping)."""
+        cur = await self.db.execute(
+            """SELECT * FROM ig_accounts
+            WHERE status IN ('active', 'sleeping')
+            ORDER BY last_used_at ASC NULLS FIRST, port ASC"""
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def update_ig_account_status(self, ig_account_id: int, status: str) -> None:
+        """Update an IG account's status (active, sleeping, error, rate_limited)."""
+        await self.db.execute(
+            "UPDATE ig_accounts SET status = ?, updated_at = ? WHERE id = ?",
+            (status, _now(), ig_account_id),
+        )
+        await self.db.commit()
+
+    async def touch_ig_account(self, ig_account_id: int) -> None:
+        """Mark an IG account as just used (update last_used_at, bump daily count)."""
+        now = _now()
+        await self.db.execute(
+            """UPDATE ig_accounts
+            SET last_used_at = ?, daily_session_count = daily_session_count + 1, updated_at = ?
+            WHERE id = ?""",
+            (now, now, ig_account_id),
+        )
+        await self.db.commit()
+
+    async def reset_daily_ig_accounts(self) -> None:
+        """Reset daily_session_count for all IG accounts (called at day boundary)."""
+        now = _now()
+        await self.db.execute(
+            "UPDATE ig_accounts SET daily_session_count = 0, daily_reset_at = ?, updated_at = ?",
+            (now, now),
+        )
+        await self.db.commit()
+
+    async def set_account_cooldown(self, ig_account_id: int, cooldown_seconds: int) -> None:
+        """Set a cooldown on an IG account (e.g. after 429 rate limit)."""
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        until = (now + timedelta(seconds=cooldown_seconds)).isoformat()
+        await self.db.execute(
+            "UPDATE ig_accounts SET cooldown_until = ?, status = 'rate_limited', updated_at = ? WHERE id = ?",
+            (until, _now(), ig_account_id),
+        )
+        await self.db.commit()
+
+    async def get_noncooled_ig_accounts(self) -> list[dict]:
+        """Return IG accounts that are NOT in cooldown (active/sleeping + cooldown expired)."""
+        now = _now()
+        cur = await self.db.execute(
+            """SELECT * FROM ig_accounts
+            WHERE status IN ('active', 'sleeping')
+            AND (cooldown_until IS NULL OR cooldown_until < ?)
+            ORDER BY last_used_at ASC NULLS FIRST, port ASC""",
+            (now,),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_unfollow_candidates(self, grace_days: int = 7, limit: int = 20) -> list[dict]:
+        """Return accounts we followed 7+ days ago that haven't followed back."""
+        cur = await self.db.execute(
+            """SELECT a.id, a.username, fl.performed_at as followed_at
+            FROM accounts a
+            JOIN interaction_log fl ON a.id = fl.account_id AND fl.action_type = 'follow'
+            LEFT JOIN interaction_log fbl ON a.id = fbl.account_id AND fbl.action_type = 'follow_back'
+            WHERE fbl.id IS NULL
+            AND fl.performed_at < datetime('now', ? || ' days')
+            AND a.is_active = 1
+            ORDER BY fl.performed_at ASC
+            LIMIT ?""",
+            (f"-{grace_days}", limit),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_story_candidates(self, limit: int = 20) -> list[dict]:
+        """Return accounts we follow (have follow interaction) for story viewing."""
+        cur = await self.db.execute(
+            """SELECT DISTINCT a.id, a.username
+            FROM accounts a
+            JOIN interaction_log il ON a.id = il.account_id AND il.action_type = 'follow'
+            WHERE a.is_active = 1
+            ORDER BY RANDOM()
+            LIMIT ?""",
+            (limit,),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_comment_candidates(self, limit: int = 10) -> list[dict]:
+        """Return content items we've already engaged with (good candidates for comments)."""
+        cur = await self.db.execute(
+            """SELECT ci.id, ci.url, ci.shortcode, ci.owner_username, ci.caption
+            FROM content_items ci
+            WHERE ci.engagement_status IN ('engaged', 'viewed')
+            AND ci.url NOT IN (
+                SELECT detail FROM interaction_log WHERE action_type = 'comment'
+            )
+            ORDER BY RANDOM()
+            LIMIT ?""",
+            (limit,),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def snapshot_own_account(self, ig_account_id: int, follower_count: int,
+                                    following_count: int = 0) -> None:
+        """Update own IG account's follower snapshot."""
+        now = _now()
+        await self.db.execute(
+            """UPDATE ig_accounts
+            SET follower_count = ?, follower_snapshot_at = ?, updated_at = ?
+            WHERE id = ?""",
+            (follower_count, now, now, ig_account_id),
+        )
+        await self.db.commit()

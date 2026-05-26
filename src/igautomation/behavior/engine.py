@@ -44,10 +44,13 @@ class BehaviorEngine:
         self._config = config
         self._session = session
 
-        # Daily counters — persist across sessions within a day.
+    # Daily counters — persist across sessions within a day.
         self._daily_likes: int = 0
         self._daily_follows: int = 0
         self._daily_profile_views: int = 0
+        self._daily_unfollows: int = 0
+        self._daily_story_views: int = 0
+        self._daily_comments: int = 0
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -106,6 +109,192 @@ class BehaviorEngine:
         logger.info("scroll_feed: max_scrolls=%d delay=%.2fs", max_scrolls, delay)
         usernames = self._cdp.scroll(max_scrolls=max_scrolls, delay=delay)
         return usernames
+
+    def browse_feed(self, max_scrolls: int = 15) -> dict:
+        """Scroll the main feed, extracting post URLs, usernames, and metadata.
+
+        Returns dict: posts (list of dicts with url/username/likes),
+        usernames (list of str), scrolls_done (int)
+        """
+        import json as _json
+
+        self._delay()
+        all_posts: list[dict] = []
+        seen_urls: set[str] = set()
+        all_usernames: set[str] = set()
+        _SKIP = {"explore", "reels", "direct", "accounts", "p", "tv", "reel"}
+        scrolls_done = 0
+
+        for _ in range(max_scrolls):
+            if self._session.is_exhausted():
+                break
+
+            extract_js = """(function() {
+                var results = [];
+                var links = document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]');
+                links.forEach(function(a) {
+                    var href = a.getAttribute('href') || '';
+                    var username = '';
+                    var parent = a.closest('article, div[role="button"]');
+                    if (parent) {
+                        var userLinks = parent.querySelectorAll('a[href*="instagram.com/"]');
+                        if (userLinks.length > 0) {
+                            var m = userLinks[0].getAttribute('href').match(/instagram\\.com\\/([^/]+)/);
+                            if (m) username = m[1];
+                        }
+                    }
+                    results.push({url: 'https://www.instagram.com' + href, username: username});
+                });
+                return JSON.stringify(results);
+            })()"""
+            raw = self._cdp.evaluate(extract_js, timeout=10)
+            if raw:
+                try:
+                    for p in _json.loads(raw):
+                        url = p.get("url", "")
+                        if url and url not in seen_urls:
+                            seen_urls.add(url)
+                            all_posts.append(p)
+                            uname = p.get("username", "")
+                            if uname and uname not in _SKIP:
+                                all_usernames.add(uname)
+                except (_json.JSONDecodeError, TypeError):
+                    pass
+
+            self._cdp.evaluate("window.scrollBy(0, window.innerHeight * 0.8)", timeout=5)
+            time.sleep(self._config.scroll_delay())
+            scrolls_done += 1
+
+        logger.info("browse_feed: %d posts, %d usernames, %d scrolls",
+                     len(all_posts), len(all_usernames), scrolls_done)
+        return {"posts": all_posts, "usernames": list(all_usernames), "scrolls_done": scrolls_done}
+
+    def browse_reels(self, max_reels: int = 20) -> dict:
+        """Swipe through the Reels tab, extracting reel URLs and metadata.
+
+        Returns dict: reels (list of dicts), scrolls_done (int)
+        """
+        import json as _json
+
+        self._delay()
+        self._cdp.navigate("https://www.instagram.com/reels/", wait=4)
+        time.sleep(2)
+
+        all_reels: list[dict] = []
+        seen_urls: set[str] = set()
+        scrolls_done = 0
+
+        for _ in range(max_reels):
+            if self._session.is_exhausted():
+                break
+            if not self._session.can_view_reel():
+                break
+
+            extract_js = """(function() {
+                var r = {};
+                var links = document.querySelectorAll('a[href*="/reel/"]');
+                if (links.length > 0) {
+                    r.url = 'https://www.instagram.com' + links[links.length - 1].getAttribute('href');
+                }
+                var userLinks = document.querySelectorAll('a[href*="instagram.com/"]');
+                for (var i = 0; i < userLinks.length; i++) {
+                    var href = userLinks[i].getAttribute('href') || '';
+                    var m = href.match(/instagram\\.com\\/([^/?/]+)/);
+                    if (m && m[1] && !['reel','reels','p','explore','direct'].includes(m[1])) {
+                        r.username = m[1]; break;
+                    }
+                }
+                var spans = document.querySelectorAll('span[dir="auto"]');
+                for (var i = 0; i < spans.length; i++) {
+                    var t = spans[i].textContent.trim();
+                    if (t.length > 20 && t.length < 500) { r.caption = t; break; }
+                }
+                return JSON.stringify(r);
+            })()"""
+            raw = self._cdp.evaluate(extract_js, timeout=10)
+            if raw:
+                try:
+                    reel = _json.loads(raw)
+                    url = reel.get("url", "")
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        all_reels.append(reel)
+                except (_json.JSONDecodeError, TypeError):
+                    pass
+
+            watch_time = random.uniform(3.0, 12.0)
+            time.sleep(watch_time)
+            self._session.reel_views_used += 1
+
+            self._cdp.evaluate(
+                "window.scrollBy(0, window.innerHeight);", timeout=5,
+            )
+            time.sleep(random.uniform(1.0, 3.0))
+            scrolls_done += 1
+
+        logger.info("browse_reels: %d reels, %d swipes", len(all_reels), scrolls_done)
+        return {"reels": all_reels, "scrolls_done": scrolls_done}
+
+    def browse_explore(self, max_scrolls: int = 10) -> dict:
+        """Browse the Explore tab for trending content.
+
+        Returns dict: posts (list of dicts), usernames (list of str), scrolls_done (int)
+        """
+        import json as _json
+
+        self._delay()
+        self._cdp.navigate("https://www.instagram.com/explore/", wait=5)
+        time.sleep(2)
+
+        all_posts: list[dict] = []
+        seen_urls: set[str] = set()
+        all_usernames: set[str] = set()
+        _SKIP = {"explore", "reels", "direct", "accounts", "p", "tv", "reel"}
+        scrolls_done = 0
+
+        for _ in range(max_scrolls):
+            if self._session.is_exhausted():
+                break
+
+            extract_js = """(function() {
+                var results = [];
+                var links = document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"], a[href*="/tv/"]');
+                links.forEach(function(a) {
+                    var href = a.getAttribute('href') || '';
+                    var username = '';
+                    var parent = a.closest('div');
+                    if (parent) {
+                        var userLinks = parent.querySelectorAll('a[href*="instagram.com/"]');
+                        if (userLinks.length > 0) {
+                            var m = userLinks[0].getAttribute('href').match(/instagram\\.com\\/([^/]+)/);
+                            if (m) username = m[1];
+                        }
+                    }
+                    results.push({url: 'https://www.instagram.com' + href, username: username});
+                });
+                return JSON.stringify(results);
+            })()"""
+            raw = self._cdp.evaluate(extract_js, timeout=10)
+            if raw:
+                try:
+                    for p in _json.loads(raw):
+                        url = p.get("url", "")
+                        if url and url not in seen_urls:
+                            seen_urls.add(url)
+                            all_posts.append(p)
+                            uname = p.get("username", "")
+                            if uname and uname not in _SKIP:
+                                all_usernames.add(uname)
+                except (_json.JSONDecodeError, TypeError):
+                    pass
+
+            self._cdp.evaluate("window.scrollBy(0, window.innerHeight * 0.8)", timeout=5)
+            time.sleep(self._config.scroll_delay())
+            scrolls_done += 1
+
+        logger.info("browse_explore: %d posts, %d usernames, %d scrolls",
+                     len(all_posts), len(all_usernames), scrolls_done)
+        return {"posts": all_posts, "usernames": list(all_usernames), "scrolls_done": scrolls_done}
 
     def view_profile(self, username: str) -> dict | None:
         """Navigate to a profile, dwell to read, then return metadata.
@@ -327,6 +516,271 @@ class BehaviorEngine:
             reel_url,
             watch_time,
             self._session.reel_views_used,
+        )
+        return True
+
+    def view_stories(self, username: str, max_stories: int = 5) -> int:
+        """Navigate to a profile, open stories, watch them passively.
+
+        Parameters
+        ----------
+        username : str
+            Instagram username (without @).
+        max_stories : int
+            Maximum number of story segments to view.
+
+        Returns
+        -------
+        int
+            Number of story segments viewed.
+        """
+        if not self._session.can_view_story():
+            logger.warning("view_stories: budget exhausted for @%s", username)
+            return 0
+
+        self._delay()
+        url = f"https://www.instagram.com/{username}/"
+        self._cdp.navigate(url, wait=4)
+
+        # Click the story ring (circular element at top of profile with rainbow border)
+        click_js = """(function() {
+            // Story ring: canvas or link element near profile header
+            var rings = document.querySelectorAll('canvas, a[role="link"]');
+            for (var i = 0; i < rings.length; i++) {
+                var r = rings[i];
+                var rect = r.getBoundingClientRect();
+                // Story ring is near the top, small square-ish
+                if (rect.top < 200 && rect.width > 50 && rect.width < 150
+                    && rect.height > 50 && rect.height < 150) {
+                    r.click();
+                    return 'clicked';
+                }
+            }
+            // Fallback: look for any element with "story" in class/href
+            var links = document.querySelectorAll('[class*="story"], a[href*="/stories/"]');
+            if (links.length > 0) { links[0].click(); return 'clicked'; }
+            return 'no_story';
+        })()"""
+
+        result = self._cdp.evaluate(click_js, timeout=10)
+        if result != "clicked":
+            logger.info("view_stories: @%s has no active stories", username)
+            return 0
+
+        # Wait for story viewer to open
+        time.sleep(2)
+
+        viewed = 0
+        for _ in range(max_stories):
+            if not self._session.can_view_story():
+                break
+
+            # Watch current story segment for 3-8 seconds
+            watch_time = random.uniform(3.0, 8.0)
+            time.sleep(watch_time)
+            viewed += 1
+            self._session.story_views_used += 1
+            self._daily_story_views += 1
+
+            # Advance to next story (click right side of screen or press Right arrow)
+            advance_js = """(function() {
+                // Try clicking the right-side navigation arrow
+                var btns = document.querySelectorAll('button, div[role="button"]');
+                for (var i = 0; i < btns.length; i++) {
+                    var b = btns[i];
+                    var rect = b.getBoundingClientRect();
+                    if (rect.right > window.innerWidth * 0.7 && rect.top < window.innerHeight * 0.5) {
+                        b.click();
+                        return 'advanced';
+                    }
+                }
+                return 'end';
+            })()"""
+            adv_result = self._cdp.evaluate(advance_js, timeout=5)
+            if adv_result != "advanced":
+                break
+
+            time.sleep(1)
+
+        # Close story viewer
+        close_js = """(function() {
+            var closeBtns = document.querySelectorAll('button');
+            for (var i = 0; i < closeBtns.length; i++) {
+                if (closeBtns[i].querySelector('svg[aria-label="Close"]')) {
+                    closeBtns[i].click(); return 'closed';
+                }
+            }
+            // Fallback: press Escape
+            document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', keyCode: 27}));
+            return 'escaped';
+        })()"""
+        self._cdp.evaluate(close_js, timeout=5)
+        time.sleep(1)
+
+        logger.info(
+            "view_stories: @%s — %d segments (session=%d, daily=%d)",
+            username, viewed, self._session.story_views_used, self._daily_story_views,
+        )
+        return viewed
+
+    def unfollow_user(self, username: str) -> bool:
+        """Navigate to a profile, click Following, confirm Unfollow.
+
+        Parameters
+        ----------
+        username : str
+            Instagram username (without @).
+
+        Returns
+        -------
+        bool
+            True if unfollowed, False otherwise.
+        """
+        if not self._session.can_unfollow():
+            logger.warning("unfollow_user: budget exhausted for @%s", username)
+            return False
+
+        self._delay()
+        url = f"https://www.instagram.com/{username}/"
+        self._cdp.navigate(url, wait=3)
+        self._dwell()
+
+        # Click "Following" button then confirm "Unfollow" in the popup
+        unfollow_js = """(function() {
+            var btns = document.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                if (btns[i].textContent.trim() === 'Following') {
+                    btns[i].click();
+                    return 'opened_dialog';
+                }
+            }
+            // Already not following — button says "Follow"
+            for (var i = 0; i < btns.length; i++) {
+                if (btns[i].textContent.trim() === 'Follow') {
+                    return 'not_following';
+                }
+            }
+            return 'not_found';
+        })()"""
+
+        result = self._cdp.evaluate(unfollow_js, timeout=10)
+        if result == "not_following":
+            logger.info("unfollow_user: @%s — already not following", username)
+            return False
+        if result != "opened_dialog":
+            logger.warning("unfollow_user: @%s — Following button not found", username)
+            return False
+
+        # Wait for confirmation dialog, click "Unfollow"
+        time.sleep(1)
+        confirm_js = """(function() {
+            var btns = document.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                if (btns[i].textContent.trim() === 'Unfollow') {
+                    btns[i].click();
+                    return 'unfollowed';
+                }
+            }
+            return 'not_found';
+        })()"""
+
+        result = self._cdp.evaluate(confirm_js, timeout=10)
+        if result == "unfollowed":
+            self._session.unfollows_used += 1
+            self._daily_unfollows += 1
+            logger.info(
+                "unfollow_user: @%s (session=%d, daily=%d)",
+                username, self._session.unfollows_used, self._daily_unfollows,
+            )
+            return True
+
+        logger.warning("unfollow_user: @%s — Unfollow confirm not found", username)
+        return False
+
+    def comment_on_post(self, post_url: str, comment_text: str) -> bool:
+        """Navigate to a post, type a comment, submit it.
+
+        Parameters
+        ----------
+        post_url : str
+            Full Instagram post URL.
+        comment_text : str
+            Comment text to post.
+
+        Returns
+        -------
+        bool
+            True if comment was posted, False otherwise.
+        """
+        if not self._session.can_comment():
+            logger.warning("comment_on_post: budget exhausted")
+            return False
+
+        self._delay()
+        self._cdp.navigate(post_url, wait=4)
+        self._dwell()
+
+        # Click comment textarea to focus it
+        focus_js = """(function() {
+            var ta = document.querySelector('textarea[aria-label*="comment"], textarea[placeholder*="comment"], form textarea');
+            if (ta) { ta.focus(); ta.click(); return 'focused'; }
+            return 'not_found';
+        })()"""
+
+        result = self._cdp.evaluate(focus_js, timeout=10)
+        if result != "focused":
+            logger.warning("comment_on_post: textarea not found for %s", post_url)
+            return False
+
+        time.sleep(1)
+
+        # Type comment using execCommand (simulates real keyboard input)
+        import json as _json
+        safe_text = _json.dumps(comment_text)  # JSON-escape for JS string
+        type_js = f"""(function() {{
+            var ta = document.querySelector('textarea[aria-label*="comment"], textarea[placeholder*="comment"], form textarea');
+            if (!ta) return 'not_found';
+            ta.focus();
+            ta.value = '';
+            document.execCommand('insertText', false, {safe_text});
+            ta.dispatchEvent(new Event('input', {{bubbles: true}}));
+            return 'typed';
+        }})()"""
+
+        result = self._cdp.evaluate(type_js, timeout=10)
+        if result != "typed":
+            logger.warning("comment_on_post: failed to type for %s", post_url)
+            return False
+
+        # Wait briefly before submitting
+        time.sleep(random.uniform(1.0, 3.0))
+
+        # Press Enter or click Post button
+        post_js = """(function() {
+            // Try pressing Enter in the textarea
+            var ta = document.querySelector('textarea[aria-label*="comment"], textarea[placeholder*="comment"], form textarea');
+            if (ta) {
+                ta.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', keyCode: 13, bubbles: true}));
+            }
+            // Also try clicking "Post" button
+            var btns = document.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                if (btns[i].textContent.trim() === 'Post') {
+                    btns[i].click();
+                    return 'posted';
+                }
+            }
+            return 'enter_sent';
+        })()"""
+
+        self._cdp.evaluate(post_js, timeout=10)
+        time.sleep(2)
+
+        self._session.comments_used += 1
+        self._daily_comments += 1
+        logger.info(
+            "comment_on_post: %s — '%s' (session=%d, daily=%d)",
+            post_url, comment_text[:30], self._session.comments_used, self._daily_comments,
         )
         return True
 

@@ -187,6 +187,21 @@ class DaemonLoop:
         db = AsyncDatabaseStore(self.config.db_path)
         await db.initialize()
 
+        # Clean up stale "running" sessions from previous daemon runs
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            cursor = await db.db.execute(
+                """UPDATE sessions SET status = 'error', ended_at = ?
+                WHERE status = 'running' AND ended_at IS NULL
+                AND started_at < datetime('now', '-1 hour')""",
+                (now,),
+            )
+            await db.db.commit()
+            if cursor.rowcount > 0:
+                logger.info("Cleaned up %d stale running sessions", cursor.rowcount)
+        except Exception as e:
+            logger.debug("Stale session cleanup skipped: %s", e)
+
         try:
             await db.create_session(session_uuid)
         except Exception:
@@ -230,6 +245,18 @@ class DaemonLoop:
 
             # Execute strategy
             match plan.strategy:
+                case "feed_browsing":
+                    await self._execute_feed_browsing(
+                    cdp, graphql, engine, db, plan, stats
+                    )
+                case "reel_browsing":
+                    await self._execute_reel_browsing(
+                    cdp, graphql, engine, db, plan, stats
+                    )
+                case "explore_browsing":
+                    await self._execute_explore_browsing(
+                    cdp, graphql, engine, db, plan, stats
+                    )
                 case "discovery":
                     await self._execute_discovery(
                         cdp, graphql, engine, db, plan, stats
@@ -251,8 +278,8 @@ class DaemonLoop:
                         cdp, graphql, engine, db, plan, stats
                     )
                 case _:
-                    logger.warning("Unknown strategy: %s, falling back to discovery", plan.strategy)
-                    await self._execute_discovery(
+                    logger.warning("Unknown strategy: %s, falling back to feed_browsing", plan.strategy)
+                    await self._execute_feed_browsing(
                         cdp, graphql, engine, db, plan, stats
                     )
 
@@ -294,6 +321,215 @@ class DaemonLoop:
     # ------------------------------------------------------------------
     # Strategy executors
     # ------------------------------------------------------------------
+
+    async def _execute_feed_browsing(
+        self, cdp: CDPClient, graphql: GraphQLClient, engine: BehaviorEngine,
+        db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
+    ) -> None:
+        """Browse the main feed like a real user — scroll, read, harvest posts, engage inline."""
+        max_scrolls = plan.params.get("max_scrolls", 15)
+
+        # Navigate to feed
+        await asyncio.get_running_loop().run_in_executor(
+            None, lambda: cdp.navigate("https://www.instagram.com/", 5)
+        )
+        await asyncio.sleep(2)
+
+        # Browse and extract
+        result = await asyncio.get_running_loop().run_in_executor(
+            None, engine.browse_feed, max_scrolls
+        )
+
+        posts = result.get("posts", [])
+        usernames = result.get("usernames", [])
+        stats["actions_taken"] = result.get("scrolls_done", 0)
+
+        # Save discovered posts to content_items
+        for post in posts:
+            url = post.get("url", "")
+            if not url:
+                continue
+            try:
+                content_type = "reel" if "/reel/" in url else "post" if "/p/" in url else "unknown"
+                await db.upsert_content_item({
+                    "url": url,
+                    "content_type": content_type,
+                    "owner_username": post.get("username", ""),
+                    "engagement_status": "pending",
+                })
+            except Exception as e:
+                logger.debug("Failed to save feed post %s: %s", url, e)
+
+        # Save discovered usernames to accounts
+        new_accounts = 0
+        for username in usernames:
+            try:
+                existing = await db.get_account_by_username(username)
+                if not existing:
+                    await db.upsert_account({"username": username})
+                    new_accounts += 1
+            except Exception:
+                pass
+
+        stats["accounts_discovered"] = new_accounts
+        stats["posts_harvested"] = len(posts)
+        logger.info("Feed browsing: %d posts, %d usernames (%d new), %d scrolls",
+                     len(posts), len(usernames), new_accounts, result.get("scrolls_done", 0))
+
+        # Inline engagement: like/save posts that meet criteria
+        await self._inline_engagement(cdp, engine, db, posts, stats)
+
+    async def _execute_reel_browsing(
+        self, cdp: CDPClient, graphql: GraphQLClient, engine: BehaviorEngine,
+        db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
+    ) -> None:
+        """Swipe through reels like a real user — watch, harvest, engage inline."""
+        max_reels = plan.params.get("max_reels", 20)
+
+        result = await asyncio.get_running_loop().run_in_executor(
+            None, engine.browse_reels, max_reels
+        )
+
+        reels = result.get("reels", [])
+        stats["actions_taken"] = result.get("scrolls_done", 0)
+
+        # Save discovered reels to content_items
+        for reel in reels:
+            url = reel.get("url", "")
+            if not url:
+                continue
+            try:
+                await db.upsert_content_item({
+                    "url": url,
+                    "content_type": "reel",
+                    "owner_username": reel.get("username", ""),
+                    "caption": reel.get("caption", ""),
+                    "engagement_status": "pending",
+                })
+            except Exception as e:
+                logger.debug("Failed to save reel %s: %s", url, e)
+
+        # Save discovered usernames
+        new_accounts = 0
+        for reel in reels:
+            username = reel.get("username", "")
+            if not username:
+                continue
+            try:
+                existing = await db.get_account_by_username(username)
+                if not existing:
+                    await db.upsert_account({"username": username})
+                    new_accounts += 1
+            except Exception:
+                pass
+
+        stats["accounts_discovered"] = new_accounts
+        stats["reels_harvested"] = len(reels)
+        logger.info("Reel browsing: %d reels, %d new accounts, %d swipes",
+                     len(reels), new_accounts, result.get("scrolls_done", 0))
+
+        # Inline engagement on watched reels
+        reel_posts = [{"url": r["url"], "username": r.get("username", "")} for r in reels if r.get("url")]
+        await self._inline_engagement(cdp, engine, db, reel_posts, stats)
+
+    async def _execute_explore_browsing(
+        self, cdp: CDPClient, graphql: GraphQLClient, engine: BehaviorEngine,
+        db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
+    ) -> None:
+        """Browse the Explore tab for trending content outside the user's feed."""
+        max_scrolls = plan.params.get("max_scrolls", 10)
+
+        result = await asyncio.get_running_loop().run_in_executor(
+            None, engine.browse_explore, max_scrolls
+        )
+
+        posts = result.get("posts", [])
+        usernames = result.get("usernames", [])
+        stats["actions_taken"] = result.get("scrolls_done", 0)
+
+        # Save discovered posts to content_items
+        for post in posts:
+            url = post.get("url", "")
+            if not url:
+                continue
+            try:
+                content_type = "reel" if "/reel/" in url else "post" if "/p/" in url else "unknown"
+                await db.upsert_content_item({
+                    "url": url,
+                    "content_type": content_type,
+                    "owner_username": post.get("username", ""),
+                    "engagement_status": "pending",
+                })
+            except Exception as e:
+                logger.debug("Failed to save explore post %s: %s", url, e)
+
+        # Save discovered usernames
+        new_accounts = 0
+        for username in usernames:
+            try:
+                existing = await db.get_account_by_username(username)
+                if not existing:
+                    await db.upsert_account({"username": username})
+                    new_accounts += 1
+            except Exception:
+                pass
+
+        stats["accounts_discovered"] = new_accounts
+        stats["posts_harvested"] = len(posts)
+        logger.info("Explore browsing: %d posts, %d usernames (%d new), %d scrolls",
+                     len(posts), len(usernames), new_accounts, result.get("scrolls_done", 0))
+
+        await self._inline_engagement(cdp, engine, db, posts, stats)
+
+    async def _inline_engagement(
+        self, cdp: CDPClient, engine: BehaviorEngine,
+        db: AsyncDatabaseStore, posts: list[dict], stats: dict,
+    ) -> None:
+        """Engage with harvested content inline — like/save/follow based on criteria."""
+        max_inline_likes = 5
+        max_inline_follows = 2
+        likes_done = 0
+        follows_done = 0
+
+        for post in posts:
+            if likes_done >= max_inline_likes and follows_done >= max_inline_follows:
+                break
+            if engine._session.is_exhausted():
+                break
+
+            url = post.get("url", "")
+            username = post.get("username", "")
+
+            # Like criteria: random ~20% chance (real users don't like everything)
+            if likes_done < max_inline_likes and engine.can_like() and random.random() < 0.2:
+                try:
+                    liked = await asyncio.get_running_loop().run_in_executor(
+                        None, engine.like_post, url
+                    )
+                    if liked:
+                        likes_done += 1
+                        stats["actions_taken"] += 1
+                        try:
+                            await db.update_content_engagement_status_by_url(url, "engaged")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            # Follow criteria: if username exists and ~10% chance
+            if follows_done < max_inline_follows and username and engine.can_follow() and random.random() < 0.1:
+                try:
+                    followed = await asyncio.get_running_loop().run_in_executor(
+                        None, engine.follow_user, username
+                    )
+                    if followed:
+                        follows_done += 1
+                        stats["actions_taken"] += 1
+                        account = await db.get_account_by_username(username)
+                        if account:
+                            await db.log_interaction(account["id"], "follow", username, self._current_session_id)
+                except Exception:
+                    pass
 
     async def _execute_discovery(
         self, cdp: CDPClient, graphql: GraphQLClient, engine: BehaviorEngine,

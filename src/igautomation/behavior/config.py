@@ -1,7 +1,7 @@
 """Behavior configuration models for organic simulation.
 
 BehaviorConfig (Pydantic v2 BaseModel) defines all tunable timing and
-budget parameters.  SessionConfig (dataclass) tracks per-session usage.
+budget parameters. SessionConfig (dataclass) tracks per-session usage.
 """
 
 from __future__ import annotations
@@ -29,12 +29,18 @@ class SessionConfig:
     max_profile_views: int
     max_reel_views: int
     max_searches: int
+    max_story_views: int = 10
+    max_comments: int = 3
+    max_unfollows: int = 5
 
     likes_used: int = 0
     follows_used: int = 0
     profile_views_used: int = 0
     reel_views_used: int = 0
     searches_used: int = 0
+    story_views_used: int = 0
+    comments_used: int = 0
+    unfollows_used: int = 0
     started_at: float = 0.0
 
     # -- budget checks -------------------------------------------------------
@@ -59,6 +65,18 @@ class SessionConfig:
         """Return True if the session still has searches available."""
         return self.searches_used < self.max_searches
 
+    def can_view_story(self) -> bool:
+        """Return True if the session still has story views available."""
+        return self.story_views_used < self.max_story_views
+
+    def can_comment(self) -> bool:
+        """Return True if the session still has comments available."""
+        return self.comments_used < self.max_comments
+
+    def can_unfollow(self) -> bool:
+        """Return True if the session still has unfollows available."""
+        return self.unfollows_used < self.max_unfollows
+
     # -- time helpers --------------------------------------------------------
 
     def time_remaining(self) -> float:
@@ -78,6 +96,9 @@ class SessionConfig:
             and not self.can_view_profile()
             and not self.can_view_reel()
             and not self.can_search()
+            and not self.can_view_story()
+            and not self.can_comment()
+            and not self.can_unfollow()
         )
 
 
@@ -89,7 +110,7 @@ class SessionConfig:
 class BehaviorConfig(BaseModel):
     """Tunable parameters for human-like automation behaviour.
 
-    All fields have sensible defaults.  Use ``new_session()`` to generate a
+    All fields have sensible defaults. Use ``new_session()`` to generate a
     fresh SessionConfig with randomised duration drawn from the configured
     min/max range.
     """
@@ -104,24 +125,29 @@ class BehaviorConfig(BaseModel):
     scroll_jitter: float = 0.3
 
     # -- session duration ----------------------------------------------------
-    session_duration_min: int = 300
-    session_duration_max: int = 1800
+    session_duration_min: int = 120
+    session_duration_max: int = 480
 
     # -- per-session caps ----------------------------------------------------
     likes_per_session_max: int = 20
     follows_per_session_max: int = 5
-    profile_views_per_session_max: int = 30
-    reel_views_per_session_max: int = 10
+    profile_views_per_session_max: int = 15
+    reel_views_per_session_max: int = 30
     searches_per_session_max: int = 8
+    story_views_per_session_max: int = 10
+    comments_per_session_max: int = 3
+    unfollows_per_session_max: int = 5
 
     # -- cooldown between sessions -------------------------------------------
-    session_cooldown_min: int = 600
-    session_cooldown_max: int = 3600
+    session_cooldown_min: int = 900
+    session_cooldown_max: int = 2700
 
     # -- daily caps ----------------------------------------------------------
     daily_likes_max: int = 80
     daily_follows_max: int = 20
     daily_profile_views_max: int = 100
+    daily_story_views_max: int = 50
+    daily_comments_max: int = 5
 
     # -- reading dwell time --------------------------------------------------
     read_dwell_min: float = 3.0
@@ -141,6 +167,9 @@ class BehaviorConfig(BaseModel):
             max_profile_views=self.profile_views_per_session_max,
             max_reel_views=self.reel_views_per_session_max,
             max_searches=self.searches_per_session_max,
+            max_story_views=self.story_views_per_session_max,
+            max_comments=self.comments_per_session_max,
+            max_unfollows=self.unfollows_per_session_max,
             started_at=time.monotonic(),
         )
         return session

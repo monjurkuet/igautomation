@@ -19,8 +19,13 @@ class DaemonConfig(BaseModel):
     # Database
     db_path: str = "igautomation.db"
 
-    # CDP
-    cdp_port: int = 9224
+    # CDP — multi-port support
+    cdp_port: int = 9224  # Legacy: used when ports is empty
+    ports: list[int] = [9222, 9224, 9225]  # Active CDP ports for account rotation
+    account_rotation: str = "round_robin"  # round_robin | least_recently_used | random
+
+    # Per-account strategy preferences (port → preferred strategies)
+    account_strategies: dict[int, list[str]] = {}
 
     # LLM endpoint (OpenAI-compatible)
     llm_base_url: str = "https://llm.datasolved.org/v1"
@@ -28,10 +33,17 @@ class DaemonConfig(BaseModel):
     llm_model: str = "gemini-2.5-flash-lite"
 
     # Session scheduling
-    max_sessions_per_day: int = 8
-    sleep_hours_start: int = 18  # No sessions midnight-7am BST (6pm-1am UTC)
+    max_sessions_per_day: int = 16
+    sleep_hours_start: int = 18 # No sessions midnight-7am BST (6pm-1am UTC)
     sleep_hours_end: int = 1
-    skip_session_probability: float = 0.15  # 15% chance to skip a session
+    skip_session_probability: float = 0.05 # 5% chance to skip a session
+
+    # Per-account cooldown (seconds) — skip accounts used within this window
+    account_cooldown_seconds: int = 1800  # 30 min between sessions on same account
+
+    # Auto-unfollow: days before unfollowing non-reciprocal follows
+    unfollow_grace_days: int = 7
+    max_unfollows_per_session: int = 5
 
     # Discovery defaults
     default_target_count: int = 100
@@ -57,13 +69,33 @@ class DaemonConfig(BaseModel):
 - Accounts needing profile refresh: {stale_accounts}
 - Recent follow-back rate: {follow_back_rate}%
 - Content items by status: {content_items}
+- Unanalyzed accounts: {unanalyzed_count}
+- Accounts needing story viewing: {story_candidates}
+- Non-reciprocal follows older than 7 days: {unfollow_candidates}
 
-Pick the next session's primary strategy and parameters. Options:
-- discovery (which strategy, what seeds/queries)
-- profiling (batch of accounts needing enrichment)
-- monitoring (re-check follower counts for tracked accounts)
-- engagement (like/follow to maintain organic appearance)
-- content_engagement (browse, like, save, and LLM-analyze content from tracked accounts)
+Pick the next session's primary strategy and parameters. Options (ORDERED BY PRIORITY):
+
+PRIMARY — do these most often (like a real IG user):
+- feed_browsing (scroll main feed, harvest posts, like/save inline) — DEFAULT activity
+- reel_browsing (swipe through Reels tab, harvest reels, engage inline) — high-value, algorithmically curated
+- explore_browsing (browse trending/Explore tab) — discovery beyond feed
+
+SECONDARY — do these when data needs attention:
+- profiling (batch of accounts needing enrichment) — only if unanalyzed > 100
+- content_engagement (browse, like, save, and LLM-analyze content) — if 200+ pending items
+- engagement (like/follow to maintain organic appearance) — if feed browsing wasn't done recently
+
+LOW FREQUENCY — do these occasionally:
+- discovery (which strategy, what seeds/queries) — only if <200 accounts tracked
+- monitoring (re-check follower counts for tracked accounts) — once every few hours
+- story_viewing (watch stories from followed accounts) — passive, low-risk
+- auto_unfollow (unfollow non-reciprocal follows >7 days old) — if candidates >10
+- comment_engagement (leave genuine comments on engaged posts) — max 1-2/day
+- own_account_monitoring (snapshot our own follower counts) — once daily
+
+IMPORTANT: A real user checks their feed and reels throughout the day. Browsing is the DEFAULT strategy.
+Don't pick discovery or profiling unless there's a clear data gap. Diversify browsing across feed/reels/explore.
+If the last 2 sessions were both browsing, add one profiling or engagement session for variety.
 
 Respond in JSON: {{"strategy": "...", "params": {{...}}, "rationale": "..."}}"""
 
@@ -129,14 +161,26 @@ class SessionPlan:
         return f"SessionPlan(strategy={self.strategy!r}, params={self.params!r})"
 
 
-# Default fallback plans when LLM is unavailable
+# Default fallback plans — browsing-first, with secondary strategies mixed in
 FALLBACK_PLANS: list[SessionPlan] = [
-    SessionPlan(strategy="discovery", params={"strategies": ["feed_browse", "discover_people"]}),
+    SessionPlan(strategy="feed_browsing", params={"max_scrolls": 15}),
+    SessionPlan(strategy="reel_browsing", params={"max_reels": 20}),
+    SessionPlan(strategy="feed_browsing", params={"max_scrolls": 10}),
+    SessionPlan(strategy="explore_browsing", params={"max_scrolls": 10}),
+    SessionPlan(strategy="reel_browsing", params={"max_reels": 15}),
+    SessionPlan(strategy="feed_browsing", params={"max_scrolls": 12}),
     SessionPlan(strategy="profiling", params={"batch_size": 20}),
-    SessionPlan(strategy="discovery", params={"strategies": ["graphql_suggestions", "cascade"]}),
-    SessionPlan(strategy="monitoring", params={"max_accounts": 30}),
+    SessionPlan(strategy="reel_browsing", params={"max_reels": 10}),
     SessionPlan(strategy="engagement", params={"max_likes": 5, "max_follows": 2}),
-    SessionPlan(strategy="content_engagement", params={"max_items": 10, "analyze": True}),
-    SessionPlan(strategy="discovery", params={"strategies": ["search", "hashtags"]}),
-    SessionPlan(strategy="content_engagement", params={"max_items": 5, "analyze": False}),
+    SessionPlan(strategy="explore_browsing", params={"max_scrolls": 8}),
+    SessionPlan(strategy="content_engagement", params={"max_items": 15, "analyze": True}),
+    SessionPlan(strategy="feed_browsing", params={"max_scrolls": 8}),
+    SessionPlan(strategy="monitoring", params={"max_accounts": 30}),
+    SessionPlan(strategy="story_viewing", params={"max_stories": 8}),
+    SessionPlan(strategy="reel_browsing", params={"max_reels": 12}),
+    SessionPlan(strategy="discovery", params={"strategies": ["feed_browse", "discover_people"]}),
+    SessionPlan(strategy="auto_unfollow", params={"max_unfollows": 5}),
+    SessionPlan(strategy="profiling", params={"batch_size": 15}),
+    SessionPlan(strategy="comment_engagement", params={"max_comments": 3}),
+    SessionPlan(strategy="own_account_monitoring", params={}),
 ]

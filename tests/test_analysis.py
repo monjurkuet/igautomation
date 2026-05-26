@@ -49,7 +49,7 @@ class TestAnalysisEngineInit:
     def test_defaults(self):
         engine = AnalysisEngine()
         assert engine.db_path == "igautomation.db"
-        assert engine.llm_model == "gpt-5.4-mini"
+        assert engine.llm_model  # model loaded from env or defaults
         assert "datasolved" in engine.llm_base_url or engine.llm_base_url
 
     def test_custom(self):

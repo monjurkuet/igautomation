@@ -10,12 +10,12 @@ def test_behavior_config_defaults():
     assert cfg.action_delay_max == 8.0
     assert cfg.scroll_delay_min == 1.5
     assert cfg.scroll_delay_max == 5.0
-    assert cfg.session_duration_min == 300
-    assert cfg.session_duration_max == 1800
+    assert cfg.session_duration_min == 120
+    assert cfg.session_duration_max == 480
     assert cfg.likes_per_session_max == 20
     assert cfg.follows_per_session_max == 5
-    assert cfg.profile_views_per_session_max == 30
-    assert cfg.reel_views_per_session_max == 10
+    assert cfg.profile_views_per_session_max == 15
+    assert cfg.reel_views_per_session_max == 30
     assert cfg.searches_per_session_max == 8
     assert cfg.daily_likes_max == 80
     assert cfg.daily_follows_max == 20
@@ -26,11 +26,11 @@ def test_session_config_generation():
     cfg = BehaviorConfig()
     for _ in range(20):
         session = cfg.new_session()
-        assert 300 <= session.duration_seconds <= 1800
+        assert 120 <= session.duration_seconds <= 480
         assert session.max_likes == 20
         assert session.max_follows == 5
-        assert session.max_profile_views == 30
-        assert session.max_reel_views == 10
+        assert session.max_profile_views == 15
+        assert session.max_reel_views == 30
         assert session.max_searches == 8
 
 

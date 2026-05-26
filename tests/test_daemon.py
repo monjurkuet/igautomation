@@ -22,10 +22,10 @@ class TestDaemonConfig:
         assert cfg.db_path == "igautomation.db"
         assert cfg.cdp_port == 9224
         assert cfg.llm_model == "gemini-2.5-flash-lite"
-        assert cfg.max_sessions_per_day == 8
+        assert cfg.max_sessions_per_day == 16
         assert cfg.sleep_hours_start == 18
         assert cfg.sleep_hours_end == 1
-        assert cfg.skip_session_probability == 0.15
+        assert cfg.skip_session_probability == 0.05
         assert cfg.llm_enabled is True
         assert len(cfg.default_strategies) == 8
 
@@ -92,6 +92,9 @@ class TestFallbackPlans:
         assert "profiling" in strategies
         assert "monitoring" in strategies
         assert "engagement" in strategies
+        # Active browsing strategies should be present
+        assert "feed_browsing" in strategies
+        assert "reel_browsing" in strategies
 
 
 # -----------------------------------------------------------------------
@@ -137,7 +140,7 @@ class TestDaemonLoop:
             mock_dt.now.return_value.hour = 3
             mock_dt.now.return_value = MagicMock(hour=3)
             # This is tricky to mock properly, so just test the method exists
-        assert hasattr(daemon, "_is_sleep_time")
+            assert hasattr(daemon, "_is_sleep_time")
 
     @pytest.mark.asyncio
     async def test_get_status_returns_dict(self):
@@ -160,9 +163,9 @@ class TestDaemonLoop:
             daemon = DaemonLoop(cfg)
             with patch("igautomation.daemon.loop.TabDiscovery.find_ig_tab", return_value=None):
                 result = await daemon._run_one_session("discovery")
-            assert result["status"] == "no_cdp"
-            assert result["strategy"] == "discovery"
-            assert "session_uuid" in result
+                assert result["status"] == "no_cdp"
+                assert result["strategy"] == "discovery"
+                assert "session_uuid" in result
 
     @pytest.mark.asyncio
     async def test_gather_stats_empty_db(self):
@@ -185,7 +188,8 @@ class TestDaemonLoop:
 class TestDaemonLoopStrategyDispatch:
     @pytest.mark.asyncio
     async def test_unknown_strategy_falls_back(self):
-        """An unknown strategy should fall back to discovery."""
+        """An unknown strategy should fall back to feed_browsing."""
         daemon = DaemonLoop()
-        # The match/case in _run_one_session handles this via default case
-        assert hasattr(daemon, "_execute_discovery")
+        assert hasattr(daemon, "_execute_feed_browsing")
+        assert hasattr(daemon, "_execute_reel_browsing")
+        assert hasattr(daemon, "_execute_explore_browsing")
