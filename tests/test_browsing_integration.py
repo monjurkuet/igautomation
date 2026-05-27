@@ -6,19 +6,18 @@ save to DB, and the full pipeline works end-to-end with mocked CDP.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from igautomation.behavior.config import BehaviorConfig, SessionConfig
+from igautomation.behavior.config import BehaviorConfig
 from igautomation.behavior.engine import BehaviorEngine
 from igautomation.cdp.client import CDPClient
 from igautomation.daemon.loop import DaemonLoop
-from igautomation.daemon.strategies import DaemonConfig, SessionPlan
+from igautomation.daemon.strategies import DaemonConfig
 from igautomation.db.store import AsyncDatabaseStore
 
 
@@ -206,22 +205,18 @@ class TestDaemonBrowsingStrategies:
             assert result["status"] in ("started", "completed", "no_cdp", "error")
 
     @pytest.mark.asyncio
-    async def test_reel_browsing_strategy_exists(self):
-        """reel_browsing should be a valid strategy."""
-        daemon = DaemonLoop()
-        assert hasattr(daemon, "_execute_reel_browsing")
+    async def test_reel_browsing_strategy_in_registry(self):
+        """reel_browsing should be in the strategy registry."""
+        from igautomation.daemon.executors import build_strategy_registry
+        registry = build_strategy_registry()
+        assert "reel_browsing" in registry
 
     @pytest.mark.asyncio
-    async def test_explore_browsing_strategy_exists(self):
-        """explore_browsing should be a valid strategy."""
-        daemon = DaemonLoop()
-        assert hasattr(daemon, "_execute_explore_browsing")
-
-    @pytest.mark.asyncio
-    async def test_inline_engagement_method_exists(self):
-        """_inline_engagement helper should exist on DaemonLoop."""
-        daemon = DaemonLoop()
-        assert hasattr(daemon, "_inline_engagement")
+    async def test_explore_browsing_strategy_in_registry(self):
+        """explore_browsing should be in the strategy registry."""
+        from igautomation.daemon.executors import build_strategy_registry
+        registry = build_strategy_registry()
+        assert "explore_browsing" in registry
 
 
 # ---------------------------------------------------------------------------

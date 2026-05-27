@@ -14,19 +14,23 @@ They verify:
 
 from __future__ import annotations
 
-import asyncio
 import json
-import os
 import tempfile
-import uuid
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from igautomation.daemon.executors import (
+    execute_content_engagement,
+    execute_discovery,
+    execute_engagement,
+    execute_monitoring,
+    execute_profiling,
+)
 from igautomation.daemon.loop import DaemonLoop
-from igautomation.daemon.strategies import DaemonConfig, FALLBACK_PLANS, SessionPlan
+from igautomation.daemon.strategies import DaemonConfig, SessionPlan
 from igautomation.daemon.scheduler import SessionScheduler
 
 
@@ -261,7 +265,7 @@ async def test_execute_discovery_no_cdp(mock_cdp, mock_graphql, mock_engine, con
         stats: dict[str, Any] = {"accounts_discovered": 0, "actions_taken": 0}
 
         # With empty collector results, discovery should complete cleanly
-        await d._execute_discovery(mock_cdp, mock_graphql, mock_engine, db, plan, stats)
+        await execute_discovery(mock_cdp, mock_graphql, mock_engine, db, plan, stats)
         assert stats["accounts_discovered"] == 0
     finally:
         await db.close()
@@ -287,7 +291,7 @@ async def test_execute_profiling_empty(config: DaemonConfig):
         stats: dict[str, Any] = {"accounts_profiled": 0, "actions_taken": 0}
 
         # No accounts in DB — should return early
-        await d._execute_profiling(MagicMock(), MagicMock(), MagicMock(), db, plan, stats)
+        await execute_profiling(MagicMock(), MagicMock(), MagicMock(), db, plan, stats)
         assert stats["accounts_profiled"] == 0
     finally:
         await db.close()
@@ -312,7 +316,7 @@ async def test_execute_monitoring_empty(config: DaemonConfig):
         plan = SessionPlan(strategy="monitoring", params={"max_accounts": 30})
         stats: dict[str, Any] = {"accounts_monitored": 0, "actions_taken": 0}
 
-        await d._execute_monitoring(MagicMock(), MagicMock(), MagicMock(), db, plan, stats)
+        await execute_monitoring(MagicMock(), MagicMock(), MagicMock(), db, plan, stats)
         assert stats["accounts_monitored"] == 0
     finally:
         await db.close()
@@ -338,7 +342,7 @@ async def test_execute_engagement_no_accounts(mock_cdp, mock_graphql, mock_engin
         stats: dict[str, Any] = {"actions_taken": 0}
 
         # Empty DB — no accounts to engage with
-        await d._execute_engagement(mock_cdp, mock_graphql, mock_engine, db, plan, stats)
+        await execute_engagement(mock_cdp, mock_graphql, mock_engine, db, plan, stats)
         assert stats["actions_taken"] == 0
     finally:
         await db.close()
@@ -363,7 +367,7 @@ async def test_execute_content_engagement_no_items(mock_cdp, mock_graphql, mock_
         plan = SessionPlan(strategy="content_engagement", params={"max_items": 5})
         stats: dict[str, Any] = {"actions_taken": 0}
 
-        await d._execute_content_engagement(mock_cdp, mock_graphql, mock_engine, db, plan, stats)
+        await execute_content_engagement(mock_cdp, mock_graphql, mock_engine, db, plan, stats)
         assert stats["actions_taken"] == 0
     finally:
         await db.close()
@@ -440,6 +444,9 @@ async def test_gather_stats_empty(config: DaemonConfig):
         assert stats["tier_breakdown"] == "none"
         assert stats["content_items"] == "none"
         assert stats["stale_accounts"] == 0
+        assert stats["unanalyzed_count"] == 0
+        assert stats["story_candidates"] == 0
+        assert stats["unfollow_candidates"] == 0
     finally:
         await db.close()
 

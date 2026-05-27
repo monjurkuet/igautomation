@@ -38,12 +38,25 @@ class DaemonConfig(BaseModel):
     sleep_hours_end: int = 1
     skip_session_probability: float = 0.05 # 5% chance to skip a session
 
+    # Scheduler config — human-like session timing
+    schedule_min_sessions_per_day: int = 5
+    schedule_max_sessions_per_day: int = 10
+    schedule_wake_hour: int = 7
+    schedule_sleep_hour: int = 23
+    schedule_min_gap_minutes: int = 15
+    schedule_max_gap_minutes: int = 120
+    schedule_cluster_probability: float = 0.3
+    schedule_cluster_gap_minutes: int = 5
+
     # Per-account cooldown (seconds) — skip accounts used within this window
     account_cooldown_seconds: int = 1800  # 30 min between sessions on same account
 
     # Auto-unfollow: days before unfollowing non-reciprocal follows
     unfollow_grace_days: int = 7
     max_unfollows_per_session: int = 5
+
+    # Comment automation (disabled by default)
+    comment_enabled: bool = False
 
     # Discovery defaults
     default_target_count: int = 100

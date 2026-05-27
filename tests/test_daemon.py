@@ -185,11 +185,4 @@ class TestDaemonLoop:
 # DaemonLoop — strategy dispatch
 # -----------------------------------------------------------------------
 
-class TestDaemonLoopStrategyDispatch:
-    @pytest.mark.asyncio
-    async def test_unknown_strategy_falls_back(self):
-        """An unknown strategy should fall back to feed_browsing."""
-        daemon = DaemonLoop()
-        assert hasattr(daemon, "_execute_feed_browsing")
-        assert hasattr(daemon, "_execute_reel_browsing")
-        assert hasattr(daemon, "_execute_explore_browsing")
+

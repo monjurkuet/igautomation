@@ -51,19 +51,28 @@ igx analyze --input output/accounts.json
 
 ```
 src/igautomation/
-├── analysis/            # LLM analysis and strategy evaluation
-├── behavior/            # Human-like browsing, rate limiting, session config
-├── cdp/                 # Chrome DevTools Protocol client + tab discovery
-├── content/              # Content loading, analysis, and engagement models
-├── daemon/              # Long-running orchestration loop and scheduling
-├── db/                  # Async SQLite schema and store
-├── graphql/              # Instagram internal API client
-├── scraper/              # Account discovery and profile analysis
-├── storage/             # Legacy JSON/CSV/SQLite export helpers
-├── cli.py               # Main Typer app (`igx`)
-├── cli_content.py       # Content/collections CLI subcommands
-├── import_accounts.py   # Import helper for account datasets
-└── migrate.py           # Database migration helper
+├── analysis/              # LLM analysis and strategy evaluation
+├── behavior/              # Human-like browsing, rate limiting, session config
+├── cdp/                   # Chrome DevTools Protocol client + tab discovery
+├── content/               # Content loading, analysis, and engagement models
+├── daemon/                # Long-running orchestration loop and scheduling
+│   ├── loop.py             # DaemonLoop orchestrator (LLM-driven session runner)
+│   ├── executors.py        # Per-strategy execution handlers
+│   ├── strategies.py       # DaemonConfig, FALLBACK_PLANS, SessionPlan
+│   ├── scheduler.py        # Human-like session timing scheduler
+│   ├── process.py          # PID file helpers, process liveness check
+│   ├── cron_config.py      # Hermes cron integration
+│   ├── service_config.py   # systemd user service renderer
+│   └── account_prober.py   # CDP port/account probe
+├── db/                    # Async SQLite schema and store
+├── graphql/               # Instagram internal API client
+├── scraper/               # Account discovery and profile analysis
+├── storage/               # Legacy JSON/CSV/SQLite export helpers
+├── cli.py                 # Main Typer app (`igx`)
+├── cli_content.py         # Content/collections CLI subcommands
+├── cli_daemon.py          # Daemon, cron, service CLI subcommands
+├── cli_db.py              # Database CLI subcommands
+└── cli_accounts.py        # Account management CLI subcommands
 ```
 
 ## Discovery Strategies
@@ -129,3 +138,57 @@ All results are saved to `./output/` by default:
 - Python 3.11+
 - Chrome with `--remote-debugging-port=9224`
 - Instagram logged into that Chrome session
+
+## Daemon
+
+The daemon runs autonomous IG sessions with LLM-driven strategy selection:
+
+```bash
+# Start daemon in foreground
+igx daemon start --foreground --db igautomation.db
+
+# Start daemon in background (PID file managed)
+igx daemon start --background --db igautomation.db
+
+# Check status
+igx daemon status
+
+# Stop daemon
+igx daemon stop
+```
+
+### Cron
+
+List, install, and remove cron jobs for scheduled analysis:
+
+```bash
+# Show current cron jobs
+igx daemon cron-show
+
+# Show next run times
+igx daemon cron-next
+
+# Install cron jobs (adds managed block to crontab)
+igx daemon cron-install
+
+# Remove managed cron block
+igx daemon cron-uninstall
+
+# Preview without modifying
+igx daemon cron-install --dry-run
+```
+
+### Systemd
+
+Generate and install a systemd user service:
+
+```bash
+# Show service file content
+igx daemon service-show
+
+# Install service file to ~/.config/systemd/user/
+igx daemon service-install
+
+# Remove service file
+igx daemon service-uninstall
+```

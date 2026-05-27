@@ -35,8 +35,13 @@ src/igautomation/
 ├── daemon/
 │   ├── __init__.py
 │   ├── loop.py # DaemonLoop — LLM-orchestrated daemon main loop
-│   ├── strategies.py # DaemonConfig + 4 strategy functions
-│   └── scheduler.py # SessionScheduler — human-like daily session patterns
+│   ├── executors.py # Per-strategy execution handlers
+│   ├── strategies.py # DaemonConfig + FALLBACK_PLANS + SessionPlan
+│   ├── scheduler.py # SessionScheduler — human-like daily session patterns
+│   ├── process.py # PID file helpers, process liveness
+│   ├── cron_config.py # Hermes cron integration
+│   ├── service_config.py # systemd user service renderer
+│   └── account_prober.py # CDP port/account probe
 ├── db/
 │   ├── __init__.py
 │   ├── schema.py # SQL DDL, indexes, migrations list
@@ -48,11 +53,12 @@ src/igautomation/
 │   └── analyzer.py # ProfileAnalyzer — verify & enrich profiles
 ├── storage/
 │   └── store.py # JSONStore, CSVStore, SQLiteStore (legacy export helpers still used by CLI)
-├── cli.py # `igx` CLI (typer app)
+├── cli.py # `igx` CLI (typer app), registers daemon/db/accounts sub-apps
 ├── cli_content.py # content/collections CLI group
-├── import_accounts.py # bulk importer for account data
-├── migrate.py # Migrator — old schema → new DB
-└── __init__.py
+├── cli_daemon.py # daemon, cron, systemd CLI commands
+├── cli_db.py # database CLI commands
+├── cli_accounts.py # account management CLI commands
+├── __init__.py
 ```
 
 ## CLI Commands
@@ -63,6 +69,35 @@ igx discover z.subha_ --count 100           # Discover accounts via cascade
 igx search "bangladeshi model"              # Search IG users
 igx suggest z.subha_                        # Get suggested accounts
 igx analyze --input output/accounts.json    # Enrich & verify profiles
+igx session --strategy feed_browsing        # Run single daemon session
+
+# Daemon
+igx daemon start --foreground               # Start daemon (foreground)
+igx daemon start --background               # Start daemon (background, PID)
+igx daemon stop                             # Stop daemon by PID
+igx daemon status                           # Show daemon status
+
+# Cron (via igx daemon)
+igx daemon cron-show                        # Show cron job configuration
+igx daemon cron-next                        # Show next run times
+igx daemon cron-install                     # Install crontab managed block
+igx daemon cron-uninstall                   # Remove managed block
+igx daemon cron-install --dry-run           # Preview install
+
+# Systemd (via igx daemon)
+igx daemon service-show                     # Show service file
+igx daemon service-install                  # Install to ~/.config/systemd/user/
+igx daemon service-uninstall                # Remove service file
+
+# Database
+igx db stats                                # Show database statistics
+igx db export                               # Export accounts to JSON
+igx db migrate                              # Run pending migrations
+
+# Accounts
+igx accounts list                           # List managed IG accounts
+igx accounts add                            # Add IG account
+igx accounts refresh                        # Refresh account data
 ```
 
 ## Module Details
@@ -136,14 +171,16 @@ igx analyze --input output/accounts.json    # Enrich & verify profiles
 - **CSVStore**: save, dynamic fieldnames
 - **SQLiteStore**: accounts + user_ids tables, upsert, get_all_accounts, get_bd_models, count
 
-### cli.py (366 lines) — Typer app `igx`
+### cli.py (~448 lines) — Typer app `igx`
 - `tabs(port=9224)` — Rich table of Chrome IG tabs
 - `discover(seeds, count=100, port=9224, output, strategies, analyze=True, verbose)` — full pipeline: collect → analyze → save JSON/CSV/SQLite → Rich table
 - `search(query, count=50, port=9224, verbose)` — user search
 - `suggest(username, port=9224, verbose)` — profile suggestions
 - `analyze(input_file, port=9224, verbose)` — analyze from JSON
 
-## Known Issues & Code Smells
+## Known Issues & Code Smells (some stale — see daemon refactor)
+
+> **Note**: Many items below predate the May 2026 daemon refactor (loop.py -> executors.py split, CLI split, scheduler propagation, PID/cron/service modules). The refactored codebase has 533-line loop.py, strategy registry in executors.py, and 180 passing tests.
 
 1. **`DOC_PROFILE_CONTENT` dead code** — defined in graphql/client.py but never used
 2. **`ProfileInfo.bio` never populated** — field exists but `_analyze_one()` never extracts bio
