@@ -231,11 +231,7 @@ class TestEdgeCases:
         )
         scheduler = SessionScheduler(config)
         date = datetime(2026, 5, 6, tzinfo=timezone.utc)
-        # This should still work — sessions assigned to hours 22-23
-        # (no hours in range(22, 6) which is empty in Python)
-        # The scheduler currently uses range(wake, sleep) which
-        # produces empty range for wrap-around.
         slots = scheduler.generate_daily_slots(date)
-        # With wrap-around, range(22, 6) is empty, so no slots generated
-        # This is a known limitation — the scheduler logs a warning
-        assert len(slots) == 0  # expected: empty for now
+        assert len(slots) > 0
+        for slot in slots:
+            assert slot.hour >= 22 or slot.hour < 6

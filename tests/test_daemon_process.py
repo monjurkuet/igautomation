@@ -6,8 +6,6 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from igautomation.daemon.process import pid_path_for, read_pid, write_pid, remove_pid, is_process_running
 from igautomation.daemon.cron_config import (
     CronJob,

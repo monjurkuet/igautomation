@@ -7,6 +7,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+import sqlite3
+
 import aiosqlite
 
 from igautomation.db.schema import SCHEMA_SQL, INDEXES_SQL, MIGRATIONS
@@ -40,14 +42,30 @@ class AsyncDatabaseStore:
         """Open the database and create tables if they don't exist."""
         self._db = await aiosqlite.connect(self._db_path)
         self._db.row_factory = aiosqlite.Row
+        await self.db.execute("PRAGMA foreign_keys = ON")
         await self._db.executescript(SCHEMA_SQL + INDEXES_SQL)
-        # Run any pending migrations
-        for _name, migration_sql in MIGRATIONS:
-            try:
-                await self._db.executescript(migration_sql)
-                await self._db.commit()
-            except Exception:
-                pass  # Already applied
+        # Migration tracking
+        cur = await self.db.execute("SELECT name FROM schema_migrations")
+        applied = {row[0] for row in await cur.fetchall()}
+        if not applied:
+            # Fresh DB — SCHEMA_SQL already includes all columns, mark everything applied
+            for name, _ in MIGRATIONS:
+                await self.db.execute(
+                    "INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)", (name,)
+                )
+            await self.db.commit()
+        else:
+            for name, migration_sql in MIGRATIONS:
+                if name in applied:
+                    continue
+                try:
+                    await self._db.executescript(migration_sql)
+                    await self.db.execute(
+                        "INSERT INTO schema_migrations (name) VALUES (?)", (name,)
+                    )
+                    await self.db.commit()
+                except sqlite3.OperationalError:
+                    pass
         logger.info("Database initialized at %s", self._db_path)
 
     async def close(self) -> None:
@@ -665,8 +683,7 @@ class AsyncDatabaseStore:
             )
             await self.db.commit()
             return cur.lastrowid  # type: ignore[return-value]
-        except Exception:
-            # Already exists — ignore
+        except sqlite3.IntegrityError:
             return 0
 
     # ------------------------------------------------------------------
@@ -752,7 +769,7 @@ class AsyncDatabaseStore:
         cur = await self.db.execute(
             """SELECT * FROM ig_accounts
             WHERE status IN ('active', 'sleeping')
-            ORDER BY last_used_at ASC NULLS FIRST, port ASC"""
+            ORDER BY CASE WHEN last_used_at IS NULL THEN 0 ELSE 1 END, last_used_at ASC, port ASC"""
         )
         rows = await cur.fetchall()
         return [dict(r) for r in rows]
@@ -803,7 +820,7 @@ class AsyncDatabaseStore:
             """SELECT * FROM ig_accounts
             WHERE status IN ('active', 'sleeping')
             AND (cooldown_until IS NULL OR cooldown_until < ?)
-            ORDER BY last_used_at ASC NULLS FIRST, port ASC""",
+            ORDER BY CASE WHEN last_used_at IS NULL THEN 0 ELSE 1 END, last_used_at ASC, port ASC""",
             (now,),
         )
         rows = await cur.fetchall()

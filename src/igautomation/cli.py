@@ -444,6 +444,3 @@ app.add_typer(content_app, name="content")
 app.add_typer(collections_app, name="collections")
 
 
-def _now_iso() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()

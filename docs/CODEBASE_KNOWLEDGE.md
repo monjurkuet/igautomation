@@ -15,7 +15,7 @@ cli: igx
 - **Build**: hatchling, entry point `igx = igautomation.cli:app`
 - **Git**: remote origin/main (monjurkuet/igautomation)
 - **Deps**: websocket-client, requests, typer, rich, aiosqlite, pydantic, croniter, pyyaml; dev: pytest, pytest-asyncio, ruff
-- **Testing**: `pytest` with `asyncio_mode = "auto"` in pyproject.toml
+- **Testing**: `pytest` with `asyncio_mode = "auto"` in pyproject.toml. **180 tests** across 11 test files (test_analysis, test_behavior_config, test_behavior_engine, test_browsing_integration, test_daemon, test_daemon_e2e, test_daemon_process, test_db_schema, test_rate_limiter, test_scheduler, test_tier_expansion)
 
 ## Architecture
 
@@ -23,41 +23,51 @@ cli: igx
 src/igautomation/
 ├── analysis/
 │   ├── __init__.py
-│   └── analyzer.py # AnalysisEngine — LLM-driven data quality & strategy
+│   └── analyzer.py               # AnalysisEngine — LLM-driven data quality & strategy
 ├── behavior/
 │   ├── __init__.py
-│   ├── config.py # BehaviorConfig (Pydantic v2) + SessionConfig (dataclass)
-│   ├── engine.py # BehaviorEngine — wraps CDP with human-like timing/caps
-│   └── rate_limiter.py # RateLimiter — exponential backoff + jitter
+│   ├── config.py                  # BehaviorConfig (Pydantic v2) + SessionConfig
+│   ├── engine.py                  # BehaviorEngine — wraps CDP with human-like timing
+│   └── rate_limiter.py            # RateLimiter — exponential backoff + jitter
 ├── cdp/
-│   ├── client.py # CDPClient — short-lived WS per command
-│   └── discovery.py # TabDiscovery — find Chrome tabs via /json
+│   ├── client.py                  # CDPClient — short-lived WS per command
+│   └── discovery.py               # TabDiscovery — find Chrome tabs via /json
+├── content/
+│   ├── __init__.py
+│   ├── loader.py                  # ContentLoader — fetch content items
+│   ├── analyzer.py                # ContentAnalyzer — LLM content analysis
+│   ├── engager.py                 # ContentEngager — like/save/view actions
+│   └── models.py                  # ContentItem, ContentType, EngagementStatus
 ├── daemon/
 │   ├── __init__.py
-│   ├── loop.py # DaemonLoop — LLM-orchestrated daemon main loop
-│   ├── executors.py # Per-strategy execution handlers
-│   ├── strategies.py # DaemonConfig + FALLBACK_PLANS + SessionPlan
-│   ├── scheduler.py # SessionScheduler — human-like daily session patterns
-│   ├── process.py # PID file helpers, process liveness
-│   ├── cron_config.py # Hermes cron integration
-│   ├── service_config.py # systemd user service renderer
-│   └── account_prober.py # CDP port/account probe
+│   ├── __main__.py                # `python -m igautomation.daemon` entry
+│   ├── loop.py                    # DaemonLoop — LLM-orchestrated main loop (545 lines)
+│   ├── executors.py               # 12 strategy executors + strategy registry (543 lines)
+│   ├── strategies.py              # DaemonConfig + FALLBACK_PLANS + SessionPlan
+│   ├── scheduler.py               # SessionScheduler — human-like daily patterns
+│   ├── process.py                 # PID file helpers, process liveness
+│   ├── cron_config.py             # Cron config — 4 default jobs, render_crontab()
+│   ├── service_config.py          # systemd user service renderer
+│   └── account_prober.py          # CDP port/account probe
 ├── db/
 │   ├── __init__.py
-│   ├── schema.py # SQL DDL, indexes, migrations list
-│   └── store.py # AsyncDatabaseStore — aiosqlite async CRUD
+│   ├── schema.py                  # SQL DDL, indexes, 5 named migrations (001-005)
+│   └── store.py                   # AsyncDatabaseStore — aiosqlite async CRUD
 ├── graphql/
-│   └── client.py # GraphQLClient — IG internal APIs
+│   └── client.py                  # GraphQLClient — IG internal APIs
 ├── scraper/
-│   ├── collector.py # AccountCollector — 6 discovery strategies
-│   └── analyzer.py # ProfileAnalyzer — verify & enrich profiles
+│   ├── collector.py               # AccountCollector — 6 discovery strategies
+│   └── analyzer.py                # ProfileAnalyzer — verify & enrich profiles
 ├── storage/
-│   └── store.py # JSONStore, CSVStore, SQLiteStore (legacy export helpers still used by CLI)
-├── cli.py # `igx` CLI (typer app), registers daemon/db/accounts sub-apps
-├── cli_content.py # content/collections CLI group
-├── cli_daemon.py # daemon, cron, systemd CLI commands
-├── cli_db.py # database CLI commands
-├── cli_accounts.py # account management CLI commands
+│   └── store.py                   # JSONStore, CSVStore, SQLiteStore (legacy)
+├── llm_config.py                  # Centralized LLM config from env/.env
+├── migrate.py                     # Data migration from old flat-file schema
+├── import_accounts.py             # Bulk import accounts from JSON
+├── cli.py                         # `igx` CLI (typer app), registers sub-apps
+├── cli_content.py                 # content/collections CLI group
+├── cli_daemon.py                  # daemon, cron, systemd CLI commands (341 lines)
+├── cli_db.py                      # database CLI commands
+├── cli_accounts.py                # account management CLI commands
 ├── __init__.py
 ```
 
@@ -171,30 +181,60 @@ igx accounts refresh                        # Refresh account data
 - **CSVStore**: save, dynamic fieldnames
 - **SQLiteStore**: accounts + user_ids tables, upsert, get_all_accounts, get_bd_models, count
 
-### cli.py (~448 lines) — Typer app `igx`
-- `tabs(port=9224)` — Rich table of Chrome IG tabs
-- `discover(seeds, count=100, port=9224, output, strategies, analyze=True, verbose)` — full pipeline: collect → analyze → save JSON/CSV/SQLite → Rich table
-- `search(query, count=50, port=9224, verbose)` — user search
-- `suggest(username, port=9224, verbose)` — profile suggestions
-- `analyze(input_file, port=9224, verbose)` — analyze from JSON
+### db/schema.py — Migration Tracking
 
-## Known Issues & Code Smells (some stale — see daemon refactor)
+5 named migrations in `MIGRATIONS` list:
+- `001_initial` — full schema + indexes
+- `002_growth_fields` — growth_rate, growth_status columns
+- `003_content_tables` — content_items, content_engagement_log, collections, content_collections
+- `004_ig_accounts_and_session_link` — ig_accounts table, session FK
+- `005_ig_account_extras` — historical no-op
 
-> **Note**: Many items below predate the May 2026 daemon refactor (loop.py -> executors.py split, CLI split, scheduler propagation, PID/cron/service modules). The refactored codebase has 533-line loop.py, strategy registry in executors.py, and 180 passing tests.
+`schema_migrations` table records which migrations have been applied. `AsyncDatabaseStore.run_migrations()` iterates `MIGRATIONS`, skips already-applied names, executes new ones atomically. Fresh DBs get all migrations applied at once.
+
+### daemon/executors.py — Strategy Registry
+
+`build_strategy_registry()` returns `dict[str, Callable]` mapping strategy names to executor functions. Registry covers all 12 strategies used in `FALLBACK_PLANS`:
+
+| Strategy | Implemented | Notes |
+|---|---|---|
+| `feed_browsing` | ✅ | scroll main feed, harvest posts |
+| `reel_browsing` | ✅ | swipe Reels tab |
+| `explore_browsing` | ✅ | browse Explore tab |
+| `discovery` | ✅ | AccountCollector with sub-strategies |
+| `profiling` | ✅ | batch ProfileAnalyzer |
+| `monitoring` | ✅ | re-check follower counts |
+| `engagement` | ✅ | like/follow actions |
+| `content_engagement` | ✅ | like/save + LLM-analyze content |
+| `own_account_monitoring` | ✅ | snapshot own IG accounts |
+| `story_viewing` | ❌ | no-op — `skipped_reason: "not_implemented"` |
+| `auto_unfollow` | ❌ | no-op — `skipped_reason: "not_implemented"` |
+| `comment_engagement` | ❌ | no-op when disabled (default) |
+
+### cli.py — Typer app `igx`
+
+## Known Issues & Code Smells
+
+> **Fact check**: 180 tests passing across 11 test files (as of May 2026). The daemon refactor (loop.py → executors.py split, strategy registry, scheduler propagation, PID/cron/service modules) is complete.
 
 1. **`DOC_PROFILE_CONTENT` dead code** — defined in graphql/client.py but never used
 2. **`ProfileInfo.bio` never populated** — field exists but `_analyze_one()` never extracts bio
 3. **Missing `json` top-level import in collector.py** — uses local `import json as _json` inside `json_imports()`
 4. **`upsert_accounts` count is misleading** — counts all processed, not truly new inserts
-5. ~~**No rate-limiting / anti-detection**~~ — **FIXED**: BehaviorEngine + RateLimiter with exponential backoff (Phase 6 complete).
-6. **`navigate()` uses `time.sleep()`** — no DOM-ready or network-idle event detection
-7. **Manual JS string escaping** in `_fetch_graphql()` — fragile, potential injection risk
-8. **Hard-coded 500-account limit** in `scrape_shoutout_pages()` — not configurable
-9. **Keyword matching false positives** — short keywords like "bd", "ctg" could match unintended text
-157. ~~**No tests**~~ — **FIXED**: 119 tests passing across 8 test files
-11. ~~**No venv**~~ — **FIXED**: uv venv at .venv/ with all deps
-12. ~~**SQLite no `updated_at`**~~ — **FIXED**: AsyncDatabaseStore has proper timestamps
-160. ~~**No indexing**~~ — **FIXED**: 21 indexes on the new schema
+5. **`navigate()` uses `time.sleep()`** — no DOM-ready or network-idle event detection
+6. **Manual JS string escaping** in `_fetch_graphql()` — fragile, potential injection risk
+7. **Hard-coded 500-account limit** in `scrape_shoutout_pages()` — not configurable
+8. **Keyword matching false positives** — short keywords like "bd", "ctg" could match unintended text
+
+### Fixed (strikethrough = done)
+
+- ~~No rate-limiting / anti-detection~~ — BehaviorEngine + RateLimiter with exponential backoff
+- ~~No tests~~ — 180 tests across 11 test files
+- ~~No venv~~ — uv venv at .venv
+- ~~SQLite no `updated_at`~~ — AsyncDatabaseStore has proper timestamps
+- ~~No indexing~~ — 21 indexes on current schema
+- ~~Old flat-file schema~~ — Async SQLite with 5 named migrations
+- ~~No migration tracking~~ — `schema_migrations` table idempotent apply
 
 ## Chrome Debug Port Conventions
 
@@ -303,29 +343,11 @@ Full plan at `docs/plans/2026-05-05-organic-ig-intelligence.md` — 7 phases, 14
 - Auto-assigns tier: mega (100K+), macro (50K+), mid (10K+), micro (1K+), nano (<1K).
 - CLI: `python -m igautomation.migrate [--dry-run]`
 
-## Updated CLI Commands
-
-```
-igx tabs                    # List Chrome tabs
-igx discover --seeds ...    # Discover accounts via cascade
-igx search "query"          # Search IG users
-igx suggest username        # Get suggested accounts
-igx analyze --input file    # Enrich & verify profiles
-igx session --strategy ...  # Run a single organic session
-igx daemon start            # Start the daemon
-igx daemon stop             # Stop the daemon
-igx daemon status           # Show daemon status + DB stats
-igx daemon analyze --type quality|strategy|tier  # Run LLM analysis
-igx db stats                # Database statistics
-igx db export               # Export to JSON
-igx db migrate              # Migrate from old schema
-```
-
 ## Hermes Cron
 
 - **Job**: `igautomation-daily-analysis` (ID: 8c132b902732)
 - **Schedule**: Daily at 9:00 AM (Asia/Dhaka)
-- **Action**: Runs AnalysisEngine (data quality + strategy optimization) and reports to this Telegram thread
+- **Action**: Runs AnalysisEngine (data quality + strategy optimization) and reports to Telegram thread
 
 ## Implementation Pitfalls
 

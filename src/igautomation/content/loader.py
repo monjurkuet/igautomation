@@ -56,7 +56,7 @@ def load_csv(path: str | Path) -> list[ContentItem]:
 
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
-        header = next(reader)  # skip header
+        header = next(reader)
 
         # Detect format: standard or explore-scraped (9 cols with href/src/type pattern)
         is_explore_format = (
@@ -66,7 +66,6 @@ def load_csv(path: str | Path) -> list[ContentItem]:
         )
 
         if is_explore_format:
-            # Explore format: 9 columns = 3 groups of (href, src, type)
             for row in reader:
                 for i in range(0, len(row), 3):
                     if i + 2 < len(row):
@@ -77,26 +76,26 @@ def load_csv(path: str | Path) -> list[ContentItem]:
                             ct = _map_csv_type(raw_type) if raw_type else detect_content_type(url)
                             items.append(ContentItem(url=url, content_type=ct))
         else:
-            # Standard format
             for row in reader:
-                url = row.get("URL/Link", row.get("URL", row.get("url", ""))).strip()
+                row_dict = dict(zip(header, row))
+                url = row_dict.get("URL/Link", row_dict.get("URL", row_dict.get("url", ""))).strip()
                 if not url or url in seen_urls:
                     continue
                 seen_urls.add(url)
 
-                declared_type = row.get("Content Type", row.get("content_type", "")).strip().lower()
+                declared_type = row_dict.get("Content Type", row_dict.get("content_type", "")).strip().lower()
                 ct = _map_csv_type(declared_type) if declared_type else detect_content_type(url)
 
                 try:
-                    priority = int(row.get("Priority", row.get("priority", "5")).strip())
+                    priority = int(row_dict.get("Priority", row_dict.get("priority", "5")).strip())
                 except (ValueError, AttributeError):
                     priority = 5
 
                 items.append(ContentItem(
                     url=url,
                     content_type=ct,
-                    category=row.get("Category", row.get("category", "")).strip(),
-                    notes=row.get("Notes", row.get("notes", "")).strip(),
+                    category=row_dict.get("Category", row_dict.get("category", "")).strip(),
+                    notes=row_dict.get("Notes", row_dict.get("notes", "")).strip(),
                     priority=priority,
                 ))
 

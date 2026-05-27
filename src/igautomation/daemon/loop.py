@@ -72,6 +72,7 @@ class DaemonLoop:
         self.config.apply_llm_config_from_env()
         self._running = False
         self._sessions_today = 0
+        self._sessions_date = datetime.now(timezone.utc).date().isoformat()
         self._current_session_id: str | None = None
         self._plan_index = 0
         self._sessions_since_analysis = 0
@@ -140,7 +141,10 @@ class DaemonLoop:
 
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, self.stop)
+            try:
+                loop.add_signal_handler(sig, self.stop)
+            except (NotImplementedError, RuntimeError):
+                logger.debug("Signal handler not supported on this platform")
 
         while self._running:
             if self._is_sleep_time():
@@ -148,11 +152,15 @@ class DaemonLoop:
                 await asyncio.sleep(600)
                 continue
 
+            now_date = datetime.now(timezone.utc).date().isoformat()
+            if now_date != self._sessions_date:
+                self._sessions_today = 0
+                self._sessions_date = now_date
+
             if self._sessions_today >= self.config.max_sessions_per_day:
                 logger.info("Daily session limit reached (%d), sleeping 1h",
                             self._sessions_today)
                 await asyncio.sleep(3600)
-                self._sessions_today = 0
                 continue
 
             if random.random() < self.config.skip_session_probability:
@@ -253,6 +261,7 @@ class DaemonLoop:
                             cdp, graphql, engine, db, plan, stats,
                             rate_limiter=self._rate_limiter,
                             current_session_id=self._current_session_id,
+                            config=self.config,
                         )
                     else:
                         logger.warning("Unknown strategy: %s, falling back to feed_browsing", plan.strategy)
@@ -260,6 +269,7 @@ class DaemonLoop:
                             cdp, graphql, engine, db, plan, stats,
                             rate_limiter=self._rate_limiter,
                             current_session_id=self._current_session_id,
+                            config=self.config,
                         )
                 finally:
                     cdp.close()

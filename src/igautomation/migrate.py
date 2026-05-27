@@ -43,11 +43,11 @@ _COUNT_RE = re.compile(r"([\d.]+)\s*([KMB]?)", re.IGNORECASE)
 _MULTIPLIERS = {"": 1, "K": 1_000, "M": 1_000_000, "B": 1_000_000_000}
 
 
-def parse_follower_count(raw: str | None) -> int | None:
+def parse_follower_count(raw: str | int | float | None) -> int | None:
     """Parse a human-readable follower count like '101K' → 101000."""
-    if not raw:
+    if raw is None:
         return None
-    raw = raw.strip().replace(",", "")
+    raw = str(raw).strip().replace(",", "")
     m = _COUNT_RE.match(raw)
     if not m:
         return None
@@ -134,41 +134,42 @@ class Migrator:
                         category = "bd_model"
                     else:
                         category = "bd"
-            if followers is not None:
-                if followers >= 1_000_000:
-                    tier = "mega"
-                elif followers >= 100_000:
-                    tier = "macro"
-                elif followers >= 25_000:
-                    tier = "mid"
-                elif followers >= 5_000:
-                    tier = "micro"
-                elif followers >= 1_000:
-                    tier = "nano"
-                else:
-                    tier = "emerging"
 
-                account_id = await new_db.upsert_account({
-                    "username": username,
-                    "user_id": old_user_ids.get(username),
-                    "full_name": acct.get("full_name", ""),
-                    "bio": acct.get("bio", ""),
-                    "follower_count": followers,
-                    "following_count": following,
-                    "post_count": posts,
-                    "category": category,
-                    "tier": tier,
-                })
-                self._stats["accounts_migrated"] += 1
+                if followers is not None:
+                    if followers >= 1_000_000:
+                        tier = "mega"
+                    elif followers >= 100_000:
+                        tier = "macro"
+                    elif followers >= 25_000:
+                        tier = "mid"
+                    elif followers >= 5_000:
+                        tier = "micro"
+                    elif followers >= 1_000:
+                        tier = "nano"
+                    else:
+                        tier = "emerging"
 
-                # Create discovery event
-                await new_db.add_discovery_event(
-                    account_id=account_id,
-                    strategy="migration",
-                    source_username=None,
-                    query_text="imported from old schema",
-                )
-                self._stats["discovery_events_created"] += 1
+                    account_id = await new_db.upsert_account({
+                        "username": username,
+                        "user_id": old_user_ids.get(username),
+                        "full_name": acct.get("full_name", ""),
+                        "bio": acct.get("bio", ""),
+                        "follower_count": followers,
+                        "following_count": following,
+                        "post_count": posts,
+                        "category": category,
+                        "tier": tier,
+                    })
+                    self._stats["accounts_migrated"] += 1
+
+                    # Create discovery event
+                    await new_db.add_discovery_event(
+                        account_id=account_id,
+                        strategy="migration",
+                        source_username=None,
+                        query_text="imported from old schema",
+                    )
+                    self._stats["discovery_events_created"] += 1
 
             # Migrate JSON accounts (may overlap — upsert handles dedup)
             for acct in json_accounts:
@@ -186,43 +187,44 @@ class Migrator:
                         category = "bd_model"
                     else:
                         category = "bd"
-            if followers is not None:
-                if followers >= 1_000_000:
-                    tier = "mega"
-                elif followers >= 100_000:
-                    tier = "macro"
-                elif followers >= 25_000:
-                    tier = "mid"
-                elif followers >= 5_000:
-                    tier = "micro"
-                elif followers >= 1_000:
-                    tier = "nano"
-                else:
-                    tier = "emerging"
 
-                account_id = await new_db.upsert_account({
-                    "username": username,
-                    "user_id": acct.get("user_id") or old_user_ids.get(username),
-                    "full_name": acct.get("full_name", ""),
-                    "bio": acct.get("bio", ""),
-                    "follower_count": followers,
-                    "following_count": following,
-                    "post_count": posts,
-                    "category": category,
-                    "tier": tier,
-                })
-                self._stats["json_accounts_migrated"] += 1
+                if followers is not None:
+                    if followers >= 1_000_000:
+                        tier = "mega"
+                    elif followers >= 100_000:
+                        tier = "macro"
+                    elif followers >= 25_000:
+                        tier = "mid"
+                    elif followers >= 5_000:
+                        tier = "micro"
+                    elif followers >= 1_000:
+                        tier = "nano"
+                    else:
+                        tier = "emerging"
 
-                # Only add discovery event if this username wasn't already
-                # handled in the old DB migration above
-                if username not in old_accounts:
-                    await new_db.add_discovery_event(
-                        account_id=account_id,
-                        strategy="migration",
-                        source_username=None,
-                        query_text="imported from JSON export",
-                    )
-                    self._stats["discovery_events_created"] += 1
+                    account_id = await new_db.upsert_account({
+                        "username": username,
+                        "user_id": acct.get("user_id") or old_user_ids.get(username),
+                        "full_name": acct.get("full_name", ""),
+                        "bio": acct.get("bio", ""),
+                        "follower_count": followers,
+                        "following_count": following,
+                        "post_count": posts,
+                        "category": category,
+                        "tier": tier,
+                    })
+                    self._stats["json_accounts_migrated"] += 1
+
+                    # Only add discovery event if this username wasn't already
+                    # handled in the old DB migration above
+                    if username not in old_accounts:
+                        await new_db.add_discovery_event(
+                            account_id=account_id,
+                            strategy="migration",
+                            source_username=None,
+                            query_text="imported from JSON export",
+                        )
+                        self._stats["discovery_events_created"] += 1
 
         finally:
             await new_db.close()

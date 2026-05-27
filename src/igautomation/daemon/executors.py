@@ -30,6 +30,7 @@ async def run_blocking(func: Callable, *args: Any, **kwargs: Any) -> Any:
 async def execute_feed_browsing(
     cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     *, rate_limiter: Any = None, current_session_id: str | None = None,
+    config: Any = None,
 ) -> None:
     max_scrolls = plan.params.get("max_scrolls", 15)
     await run_blocking(lambda: cdp.navigate("https://www.instagram.com/", 5))
@@ -59,7 +60,7 @@ async def execute_feed_browsing(
                 await db.upsert_account({"username": username})
                 new_accounts += 1
         except Exception:
-            pass
+            logger.debug("Failed to upsert account %s", username)
     stats["accounts_discovered"] = new_accounts
     stats["posts_harvested"] = len(posts)
     logger.info("Feed browsing: %d posts, %d usernames (%d new), %d scrolls",
@@ -70,6 +71,7 @@ async def execute_feed_browsing(
 async def execute_reel_browsing(
     cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     *, rate_limiter: Any = None, current_session_id: str | None = None,
+    config: Any = None,
 ) -> None:
     max_reels = plan.params.get("max_reels", 20)
     result = await run_blocking(engine.browse_reels, max_reels)
@@ -99,7 +101,7 @@ async def execute_reel_browsing(
                 await db.upsert_account({"username": username})
                 new_accounts += 1
         except Exception:
-            pass
+            logger.debug("Failed to upsert reel account %s", username)
     stats["accounts_discovered"] = new_accounts
     stats["reels_harvested"] = len(reels)
     logger.info("Reel browsing: %d reels, %d new accounts, %d swipes",
@@ -111,6 +113,7 @@ async def execute_reel_browsing(
 async def execute_explore_browsing(
     cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     *, rate_limiter: Any = None, current_session_id: str | None = None,
+    config: Any = None,
 ) -> None:
     max_scrolls = plan.params.get("max_scrolls", 10)
     result = await run_blocking(engine.browse_explore, max_scrolls)
@@ -138,7 +141,7 @@ async def execute_explore_browsing(
                 await db.upsert_account({"username": username})
                 new_accounts += 1
         except Exception:
-            pass
+            logger.debug("Failed to upsert explore account %s", username)
     stats["accounts_discovered"] = new_accounts
     stats["posts_harvested"] = len(posts)
     logger.info("Explore browsing: %d posts, %d usernames (%d new), %d scrolls",
@@ -149,6 +152,7 @@ async def execute_explore_browsing(
 async def execute_discovery(
     cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     *, rate_limiter: Any = None, current_session_id: str | None = None,
+    config: Any = None,
 ) -> None:
     from igautomation.scraper.collector import AccountCollector
     collector = AccountCollector(cdp, graphql, engine)
@@ -182,6 +186,7 @@ async def execute_discovery(
 async def execute_profiling(
     cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     *, rate_limiter: Any = None, current_session_id: str | None = None,
+    config: Any = None,
 ) -> None:
     from igautomation.scraper.analyzer import ProfileAnalyzer
     batch_size = plan.params.get("batch_size", 20)
@@ -226,11 +231,12 @@ async def execute_profiling(
 async def execute_monitoring(
     cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     *, rate_limiter: Any = None, current_session_id: str | None = None,
+    config: Any = None,
 ) -> None:
     max_accounts = plan.params.get("max_accounts", 30)
     cur = await db.db.execute(
         """SELECT id, username, follower_count FROM accounts
-           WHERE last_checked_at IS NOT NULL
+           WHERE (last_checked_at IS NULL OR last_checked_at < datetime('now', '-1 day'))
            ORDER BY last_checked_at ASC LIMIT ?""",
         (max_accounts,),
     )
@@ -238,6 +244,7 @@ async def execute_monitoring(
     if not rows:
         logger.info("No accounts to monitor")
         return
+    monitored_count = 0
     for row in rows:
         if engine._session.is_exhausted():
             break
@@ -268,7 +275,8 @@ async def execute_monitoring(
         engine._delay()
         engine._session.profile_views_used += 1
         stats["actions_taken"] += 1
-    stats["accounts_monitored"] = len(rows)
+        monitored_count += 1
+    stats["accounts_monitored"] = monitored_count
     try:
         growth_counts = await db.refresh_growth_for_all()
         logger.info("Growth status recomputed: %s", growth_counts)
@@ -279,6 +287,7 @@ async def execute_monitoring(
 async def execute_engagement(
     cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     *, rate_limiter: Any = None, current_session_id: str | None = None,
+    config: Any = None,
 ) -> None:
     max_follows = plan.params.get("max_follows", 2)
     max_profile_views = plan.params.get("max_profile_views", 5)
@@ -316,9 +325,21 @@ async def execute_engagement(
         stats["actions_taken"] += 1
 
 
+def _content_type_from_db(value: str) -> str:
+    v = value.lower().strip() if value else ""
+    mapping = {
+        "reel": "reel", "reels": "reel", "clip": "reel",
+        "carousel": "carousel", "album": "carousel",
+        "post": "post", "photo": "post", "image": "post",
+        "video": "video",
+    }
+    return mapping.get(v, "unknown")
+
+
 async def execute_content_engagement(
     cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     *, rate_limiter: Any = None, current_session_id: str | None = None,
+    config: Any = None,
 ) -> None:
     from igautomation.content.engager import ContentEngager
     from igautomation.content.analyzer import analyze_content_browse
@@ -343,7 +364,8 @@ async def execute_content_engagement(
         item_id, url, content_type = row["id"], row["url"], row["content_type"]
         shortcode = row["shortcode"] if "shortcode" in row.keys() else ""
         try:
-            ct = ContentType.REEL if content_type == "Clip" else ContentType.CAROUSEL if content_type == "Carousel" else ContentType.VIDEO
+            mapped = _content_type_from_db(content_type)
+            ct = getattr(ContentType, mapped.upper(), ContentType.VIDEO)
             item = CI(url=url, content_type=ct, shortcode=shortcode or "")
             result = engager.engage_content(item)
             stats["actions_taken"] += 1
@@ -396,59 +418,38 @@ async def execute_content_engagement(
 async def execute_story_viewing(
     cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     *, rate_limiter: Any = None, current_session_id: str | None = None,
+    config: Any = None,
 ) -> None:
-    max_stories = plan.params.get("max_stories", 8)
-    candidates = await db.get_story_candidates(limit=max_stories)
-    if not candidates:
-        logger.info("No story candidates found -- skipping story_viewing")
-        return
-    for _c in candidates:
-        if engine._session.is_exhausted():
-            break
-        try:
-            engine._delay()
-            engine._session.story_views_used += 1
-            stats["actions_taken"] += 1
-        except Exception:
-            pass
-    logger.info("Story viewing: viewed %d stories", len(candidates))
+    stats["skipped_reason"] = "not_implemented"
+    logger.warning("Story viewing not yet implemented -- skipping")
 
 
 async def execute_auto_unfollow(
     cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     *, rate_limiter: Any = None, current_session_id: str | None = None,
+    config: Any = None,
 ) -> None:
-    max_unfollows = plan.params.get("max_unfollows", 5)
-    grace_days = plan.params.get("unfollow_grace_days", 7)
-    candidates = await db.get_unfollow_candidates(grace_days=grace_days, limit=max_unfollows)
-    if not candidates:
-        logger.info("No unfollow candidates -- skipping auto_unfollow")
-        return
-    unfollowed = 0
-    for c in candidates:
-        if engine._session.is_exhausted():
-            break
-        username = c["username"]
-        try:
-            engine._delay()
-            unfollowed += 1
-            await db.log_interaction(c["id"], "unfollow", username, current_session_id)
-            stats["actions_taken"] += 1
-        except Exception:
-            pass
-    logger.info("Auto unfollow: unfollowed %d accounts", unfollowed)
+    stats["skipped_reason"] = "not_implemented"
+    logger.warning("Auto unfollow not yet implemented -- skipping")
 
 
 async def execute_comment_engagement(
     cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     *, rate_limiter: Any = None, current_session_id: str | None = None,
+    config: Any = None,
 ) -> None:
-    logger.info("comment_engagement is disabled by default -- skipping")
+    comment_enabled = (config or {}).get("comment_enabled", False) if isinstance(config, dict) else getattr(config, "comment_enabled", False)
+    if comment_enabled:
+        logger.info("Comment engagement implementation pending")
+    else:
+        stats["skipped_reason"] = "comment_engagement_disabled"
+        logger.info("Comment engagement is disabled by default -- skipping")
 
 
 async def execute_own_account_monitoring(
     cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
     *, rate_limiter: Any = None, current_session_id: str | None = None,
+    config: Any = None,
 ) -> None:
     accounts = await db.get_available_ig_accounts()
     if not accounts:
@@ -464,8 +465,8 @@ async def execute_own_account_monitoring(
                 fol = (profile_data.get("edge_follow", {}) or {}).get("count", 0)
                 await db.snapshot_own_account(acct["id"], fc, following_count=fol)
                 stats["actions_taken"] += 1
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Own account monitoring failed for %s: %s", acct["username"], e)
     logger.info("Own account monitoring: refreshed %d accounts", len(accounts))
 
 
@@ -498,9 +499,9 @@ async def _inline_engagement(
                     try:
                         await db.update_content_engagement_status_by_url(url, "engaged")
                     except Exception:
-                        pass
+                        logger.debug("Failed to update content engagement status for %s", url)
             except Exception:
-                pass
+                logger.debug("Failed to like post %s", url)
         if follows_done < max_inline_follows and username and engine.can_follow() and random.random() < 0.1:
             try:
                 followed = await run_blocking(engine.follow_user, username)
@@ -510,8 +511,8 @@ async def _inline_engagement(
                     account = await db.get_account_by_username(username)
                     if account:
                         await db.log_interaction(account["id"], "follow", username, current_session_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to follow user %s inline: %s", username, e)
 
 
 # ---------------------------------------------------------------------------

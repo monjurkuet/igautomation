@@ -1,4 +1,7 @@
-"""SQL DDL and migration helpers for the igautomation database."""
+"""SQL DDL and migration helpers for the igautomation database.
+
+SCHEMA_SQL = current full schema. MIGRATIONS = transitional upgrades for old DBs.
+"""
 
 SCHEMA_SQL = """
 -- Core accounts table
@@ -71,7 +74,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 -- LLM analysis results
 CREATE TABLE IF NOT EXISTS analysis_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_id INTEGER REFERENCES accounts(id),
+    account_id INTEGER,
     analysis_type TEXT NOT NULL,
     prompt_summary TEXT,
     result TEXT,
@@ -143,6 +146,12 @@ CREATE TABLE IF NOT EXISTS content_collections (
     collection_id INTEGER NOT NULL REFERENCES collections(id),
     added_at TEXT DEFAULT (datetime('now')),
     UNIQUE(content_item_id, collection_id)
+);
+
+-- Migration tracking
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    name TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
 
@@ -284,9 +293,9 @@ ALTER TABLE sessions ADD COLUMN ig_account_id INTEGER REFERENCES ig_accounts(id)
     (
         "005_ig_account_extras",
         """
-ALTER TABLE ig_accounts ADD COLUMN cooldown_until TEXT;
-ALTER TABLE ig_accounts ADD COLUMN preferred_strategies TEXT;
-ALTER TABLE ig_accounts ADD COLUMN warmup_complete INTEGER DEFAULT 0;
+-- cooldown_until, preferred_strategies, warmup_complete already in 004
+-- This migration kept for historical compatibility, no-op for fresh DBs
+SELECT 1;
 """,
     ),
 ]

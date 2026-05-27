@@ -37,46 +37,47 @@ async def import_accounts(
     imported = 0
     skipped = 0
 
-    for acc in accounts:
-        if isinstance(acc, str):
-            username = acc
-            acc_data = {}
-        elif isinstance(acc, dict):
-            username = acc.get("username", "")
-            acc_data = acc
-        else:
-            skipped += 1
-            continue
+    try:
+        for acc in accounts:
+            if isinstance(acc, str):
+                username = acc
+                acc_data = {}
+            elif isinstance(acc, dict):
+                username = acc.get("username", "")
+                acc_data = acc
+            else:
+                skipped += 1
+                continue
 
-        if not username:
-            skipped += 1
-            continue
+            if not username:
+                skipped += 1
+                continue
 
-        # Map collector output fields to DB fields
-        data = {
-            "username": username,
-            "user_id": acc_data.get("user_id") or user_ids.get(username),
-            "full_name": acc_data.get("full_name", ""),
-            "bio": acc_data.get("bio", ""),
-            "profile_pic_url": acc_data.get("profile_pic_url", ""),
-            "is_private": acc_data.get("is_private", False),
-            "is_verified": acc_data.get("is_verified", False),
-            "follower_count": acc_data.get("follower_count"),
-            "following_count": acc_data.get("following_count"),
-            "post_count": acc_data.get("post_count"),
-            "category": acc_data.get("category"),
-            "tier": acc_data.get("tier"),
-        }
+            # Map collector output fields to DB fields
+            data = {
+                "username": username,
+                "user_id": acc_data.get("user_id") or user_ids.get(username),
+                "full_name": acc_data.get("full_name", ""),
+                "bio": acc_data.get("bio", ""),
+                "profile_pic_url": acc_data.get("profile_pic_url", ""),
+                "is_private": acc_data.get("is_private", False),
+                "is_verified": acc_data.get("is_verified", False),
+                "follower_count": acc_data.get("follower_count"),
+                "following_count": acc_data.get("following_count"),
+                "post_count": acc_data.get("post_count"),
+                "category": acc_data.get("category"),
+                "tier": acc_data.get("tier"),
+            }
 
-        try:
-            await db.upsert_account(data)
-            await db.add_discovery_event(username, strategy=strategy)
-            imported += 1
-        except Exception as exc:
-            print(f"  Error importing @{username}: {exc}")
-            skipped += 1
-
-    await db.close()
+            try:
+                account_id = await db.upsert_account(data)
+                await db.add_discovery_event(account_id, strategy=strategy)
+                imported += 1
+            except Exception as exc:
+                print(f"  Error importing @{username}: {exc}")
+                skipped += 1
+    finally:
+        await db.close()
     print(f"Imported {imported} accounts ({skipped} skipped)")
 
 

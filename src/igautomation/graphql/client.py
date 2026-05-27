@@ -65,32 +65,37 @@ class GraphQLClient:
         endpoint: str = "/graphql/query",
     ) -> dict[str, Any] | None:
         """Send a GraphQL query via browser fetch() and return parsed JSON."""
+        endpoint_escaped = json.dumps(endpoint)
+        friendly_name_escaped = json.dumps(friendly_name)
+        doc_id_escaped = json.dumps(doc_id)
         variables_json = json.dumps(variables, separators=(",", ":"))
-        # Escape for JS string literal
-        variables_escaped = variables_json.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+        variables_escaped = json.dumps(variables_json)
+        rate_limited_escaped = json.dumps(_RATE_LIMITED)
+
+        ig_app_id_escaped = json.dumps(IG_APP_ID)
 
         js = f"""
         (function() {{
-            return fetch('{endpoint}', {{
+            return fetch({endpoint_escaped}, {{
                 method: 'POST',
                 headers: {{
                     'Content-Type': 'application/x-www-form-urlencoded',
-                    'X-IG-App-ID': '{IG_APP_ID}',
+                    'X-IG-App-ID': {ig_app_id_escaped},
                     'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '',
                     'X-Requested-With': 'XMLHttpRequest',
                 }},
                 body: new URLSearchParams({{
-                    'fb_api_req_friendly_name': '{friendly_name}',
-                    'doc_id': '{doc_id}',
-                    'variables': '{variables_escaped}',
+                    'fb_api_req_friendly_name': {friendly_name_escaped},
+                    'doc_id': {doc_id_escaped},
+                    'variables': {variables_escaped},
                 }}).toString()
             }})
             .then(function(r) {{
-                if (r.status === 429) return '{_RATE_LIMITED}';
+                if (r.status === 429) return {rate_limited_escaped};
                 return r.json();
             }})
             .then(function(data) {{
-                if (data === '{_RATE_LIMITED}') return '{_RATE_LIMITED}';
+                if (data === {rate_limited_escaped}) return {rate_limited_escaped};
                 return JSON.stringify(data);
             }})
             .catch(function(e) {{ return JSON.stringify({{error: e.message}}); }});
@@ -125,22 +130,26 @@ class GraphQLClient:
             JSON string of the response body, or the _RATE_LIMITED sentinel
             if HTTP 429 was received, or None on error.
         """
+        url_escaped = json.dumps(url)
+        ig_app_id_escaped = json.dumps(IG_APP_ID)
+        rate_limited_escaped = json.dumps(_RATE_LIMITED)
+
         js = f"""
         (function() {{
-            return fetch('{url}', {{
+            return fetch({url_escaped}, {{
                 method: 'GET',
                 headers: {{
-                    'X-IG-App-ID': '{IG_APP_ID}',
+                    'X-IG-App-ID': {ig_app_id_escaped},
                     'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '',
                     'X-Requested-With': 'XMLHttpRequest',
                 }}
             }})
             .then(function(r) {{
-                if (r.status === 429) return '{_RATE_LIMITED}';
+                if (r.status === 429) return {rate_limited_escaped};
                 return r.json();
             }})
             .then(function(data) {{
-                if (data === '{_RATE_LIMITED}') return '{_RATE_LIMITED}';
+                if (data === {rate_limited_escaped}) return {rate_limited_escaped};
                 return JSON.stringify(data);
             }})
             .catch(function() {{ return null; }});
@@ -264,7 +273,7 @@ class GraphQLClient:
                 # Fallback: walk the response for any numeric id
                 data_str = json.dumps(data)
                 import re
-                m = re.search(r'"id"\s*:\s*"?(\\d{5,})"', data_str)
+                m = re.search(r'"id"\s*:\s*"?(\d{5,})"', data_str)
                 if m:
                     logger.debug("Resolved @%s → %s via fallback scan", username, m.group(1))
                     return m.group(1)

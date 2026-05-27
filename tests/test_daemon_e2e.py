@@ -253,8 +253,6 @@ async def test_auto_analysis_trigger(config: DaemonConfig):
 @pytest.mark.asyncio
 async def test_execute_discovery_no_cdp(mock_cdp, mock_graphql, mock_engine, config: DaemonConfig):
     """Verify discovery executor handles empty results gracefully."""
-    d = DaemonLoop(config)
-
     from igautomation.db.store import AsyncDatabaseStore
 
     db = AsyncDatabaseStore(config.db_path)
@@ -264,23 +262,15 @@ async def test_execute_discovery_no_cdp(mock_cdp, mock_graphql, mock_engine, con
         plan = SessionPlan(strategy="discovery", params={"strategies": ["feed_browse", "search"]})
         stats: dict[str, Any] = {"accounts_discovered": 0, "actions_taken": 0}
 
-        # With empty collector results, discovery should complete cleanly
         await execute_discovery(mock_cdp, mock_graphql, mock_engine, db, plan, stats)
         assert stats["accounts_discovered"] == 0
     finally:
         await db.close()
 
 
-# -----------------------------------------------------------------------
-# Test: _execute_profiling — uses run_in_executor + rate limiter
-# -----------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_execute_profiling_empty(config: DaemonConfig):
     """Verify profiling executor handles no unanalyzed accounts."""
-    d = DaemonLoop(config)
-
     from igautomation.db.store import AsyncDatabaseStore
 
     db = AsyncDatabaseStore(config.db_path)
@@ -290,23 +280,15 @@ async def test_execute_profiling_empty(config: DaemonConfig):
         plan = SessionPlan(strategy="profiling", params={"batch_size": 20})
         stats: dict[str, Any] = {"accounts_profiled": 0, "actions_taken": 0}
 
-        # No accounts in DB — should return early
         await execute_profiling(MagicMock(), MagicMock(), MagicMock(), db, plan, stats)
         assert stats["accounts_profiled"] == 0
     finally:
         await db.close()
 
 
-# -----------------------------------------------------------------------
-# Test: _execute_monitoring — uses run_in_executor + rate limiter
-# -----------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_execute_monitoring_empty(config: DaemonConfig):
     """Verify monitoring executor handles no accounts to monitor."""
-    d = DaemonLoop(config)
-
     from igautomation.db.store import AsyncDatabaseStore
 
     db = AsyncDatabaseStore(config.db_path)
@@ -322,16 +304,9 @@ async def test_execute_monitoring_empty(config: DaemonConfig):
         await db.close()
 
 
-# -----------------------------------------------------------------------
-# Test: _execute_engagement — uses run_in_executor + rate limiter
-# -----------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_execute_engagement_no_accounts(mock_cdp, mock_graphql, mock_engine, config: DaemonConfig):
     """Verify engagement executor handles no eligible accounts."""
-    d = DaemonLoop(config)
-
     from igautomation.db.store import AsyncDatabaseStore
 
     db = AsyncDatabaseStore(config.db_path)
@@ -341,7 +316,6 @@ async def test_execute_engagement_no_accounts(mock_cdp, mock_graphql, mock_engin
         plan = SessionPlan(strategy="engagement", params={})
         stats: dict[str, Any] = {"actions_taken": 0}
 
-        # Empty DB — no accounts to engage with
         await execute_engagement(mock_cdp, mock_graphql, mock_engine, db, plan, stats)
         assert stats["actions_taken"] == 0
     finally:
@@ -356,8 +330,6 @@ async def test_execute_engagement_no_accounts(mock_cdp, mock_graphql, mock_engin
 @pytest.mark.asyncio
 async def test_execute_content_engagement_no_items(mock_cdp, mock_graphql, mock_engine, config: DaemonConfig):
     """Verify content engagement handles no pending items."""
-    d = DaemonLoop(config)
-
     from igautomation.db.store import AsyncDatabaseStore
 
     db = AsyncDatabaseStore(config.db_path)
@@ -414,10 +386,6 @@ def test_sleep_time_normal(config: DaemonConfig):
     with patch("igautomation.daemon.loop.datetime") as mock_dt:
         mock_dt.now.return_value.hour = 10  # Normal hour (18-1 is sleep)
         mock_dt.now.return_value.tzinfo = None
-        # Actually test the real hour
-        from datetime import datetime, timezone
-        hour = datetime.now(timezone.utc).hour
-        # Just check the method exists and returns bool
         result = d._is_sleep_time()
         assert isinstance(result, bool)
 
@@ -511,7 +479,7 @@ async def test_run_one_session_lifecycle(daemon: DaemonLoop):
             "SELECT COUNT(*) FROM sessions WHERE session_uuid = ?",
             (result["session_uuid"],),
         )
-        row = await cur.fetchone()
+        await cur.fetchone()
     finally:
         await store.close()
 

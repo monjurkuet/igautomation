@@ -22,7 +22,7 @@ import logging
 import random
 from datetime import datetime, timedelta, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,26 @@ class SessionScheduleConfig(BaseModel):
     cluster_gap_minutes: int = Field(
         5, ge=1, description="Minutes between sessions in a cluster"
     )
+
+    @field_validator("max_sessions_per_day")
+    @classmethod
+    def _validate_max_sessions(cls, v, info):
+        min_val = info.data.get("min_sessions_per_day")
+        if min_val is not None and v < min_val:
+            raise ValueError(
+                f"max_sessions_per_day ({v}) must be >= min_sessions_per_day ({min_val})"
+            )
+        return v
+
+    @field_validator("max_gap_minutes")
+    @classmethod
+    def _validate_max_gap(cls, v, info):
+        min_val = info.data.get("min_gap_minutes")
+        if min_val is not None and v < min_val:
+            raise ValueError(
+                f"max_gap_minutes ({v}) must be >= min_gap_minutes ({min_val})"
+            )
+        return v
 
     # Activity profile weights by hour (UTC) — higher weight = more likely
     # to have a session in that hour. 7am-10am = morning check,
@@ -125,8 +145,11 @@ class SessionScheduler:
             self._config.max_sessions_per_day,
         )
 
-        # Build weighted hour distribution
-        hours = list(range(self._config.wake_hour, self._config.sleep_hour))
+        # Build weighted hour distribution — handle wrap-around (wake > sleep)
+        if self._config.sleep_hour <= self._config.wake_hour:
+            hours = list(range(self._config.wake_hour, 24)) + list(range(0, self._config.sleep_hour))
+        else:
+            hours = list(range(self._config.wake_hour, self._config.sleep_hour))
         weights = [self._config.activity_weights.get(h, 0.5) for h in hours]
 
         # Assign sessions to hours using weighted sampling

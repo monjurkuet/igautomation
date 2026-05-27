@@ -51,43 +51,57 @@ igx analyze --input output/accounts.json
 
 ```
 src/igautomation/
-├── analysis/              # LLM analysis and strategy evaluation
-├── behavior/              # Human-like browsing, rate limiting, session config
-├── cdp/                   # Chrome DevTools Protocol client + tab discovery
-├── content/               # Content loading, analysis, and engagement models
-├── daemon/                # Long-running orchestration loop and scheduling
-│   ├── loop.py             # DaemonLoop orchestrator (LLM-driven session runner)
-│   ├── executors.py        # Per-strategy execution handlers
-│   ├── strategies.py       # DaemonConfig, FALLBACK_PLANS, SessionPlan
-│   ├── scheduler.py        # Human-like session timing scheduler
-│   ├── process.py          # PID file helpers, process liveness check
-│   ├── cron_config.py      # Hermes cron integration
-│   ├── service_config.py   # systemd user service renderer
-│   └── account_prober.py   # CDP port/account probe
-├── db/                    # Async SQLite schema and store
-├── graphql/               # Instagram internal API client
-├── scraper/               # Account discovery and profile analysis
-├── storage/               # Legacy JSON/CSV/SQLite export helpers
-├── cli.py                 # Main Typer app (`igx`)
-├── cli_content.py         # Content/collections CLI subcommands
-├── cli_daemon.py          # Daemon, cron, service CLI subcommands
-├── cli_db.py              # Database CLI subcommands
-└── cli_accounts.py        # Account management CLI subcommands
+├── analysis/               # LLM analysis and strategy evaluation
+├── behavior/               # Human-like browsing, rate limiting, session config
+├── cdp/                    # Chrome DevTools Protocol client + tab discovery
+├── content/                # Content loading, analysis, and engagement models
+├── daemon/                 # Long-running orchestration loop and scheduling
+│   ├── loop.py              # DaemonLoop orchestrator (LLM-driven session runner)
+│   ├── executors.py         # Per-strategy execution handlers (+ strategy registry)
+│   ├── strategies.py        # DaemonConfig, FALLBACK_PLANS, SessionPlan
+│   ├── scheduler.py         # Human-like session timing scheduler
+│   ├── process.py           # PID file helpers, process liveness check
+│   ├── cron_config.py       # Hermes cron integration (4 default jobs)
+│   ├── service_config.py    # systemd user service renderer
+│   └── account_prober.py    # CDP port/account probe
+├── db/                     # Async SQLite schema, store, + migration tracking
+│   ├── schema.py            # DDL, indexes, 5 named migrations (001-005)
+│   └── store.py             # AsyncDatabaseStore — aiosqlite async CRUD
+├── graphql/                # Instagram internal API client
+├── scraper/                # Account discovery and profile analysis
+├── storage/                # Legacy JSON/CSV/old-SQLite export helpers
+├── llm_config.py           # Centralized LLM config from env/.env
+├── migrate.py              # Data migration from old flat-file schema
+├── import_accounts.py      # Bulk import accounts from JSON
+├── cli.py                  # Main Typer app (`igx`)
+├── cli_content.py          # Content/collections CLI subcommands
+├── cli_daemon.py           # Daemon, cron, service CLI subcommands
+├── cli_db.py               # Database CLI subcommands
+└── cli_accounts.py         # Account management CLI subcommands
 ```
 
-## Discovery Strategies
+## Daemon Strategies
 
-| Strategy | How it works | Speed | Quality |
-|---|---|---|---|
-| `existing_tabs` | Scrape profile links from open Chrome tabs | ⚡ Instant | Low |
-| `feed_browse` | Browse the home feed and collect usernames from posts | ⚡ Fast | Medium |
-| `discover_people` | Fetch Instagram's Discover People suggestions | ⚡ Fast | High |
-| `shoutout_pages` | Visit BD shoutout pages, scroll, collect links | 🐢 Slow | Medium |
-| `graphql_suggestions` | Query IG's "Suggested for you" API | ⚡ Fast | High |
-| `search` | IG user search API | ⚡ Fast | Medium |
-| `hashtags` | Visit hashtag pages, collect from posts | 🐢 Slow | Medium |
-| `cascade` | For each account found, fetch THEIR suggestions | ⚡ Fast | Very High |
-| `content_engagement` | Browse/engage with content and optionally analyze it | ⚡ Fast | High |
+The daemon uses LLM-driven strategy selection from the strategy registry in `executors.py`. These are the session strategies — distinct from the old CLI discovery strategies.
+
+### Implemented (12/12 registered)
+
+| Strategy | Status | Description |
+|---|---|---|
+| `feed_browsing` | ✅ implemented | Scroll main feed, harvest posts, like/save inline |
+| `reel_browsing` | ✅ implemented | Swipe through Reels tab, harvest reels, engage inline |
+| `explore_browsing` | ✅ implemented | Browse trending/Explore tab |
+| `discovery` | ✅ implemented | Run AccountCollector with sub-strategies (feed_browse, discover_people, etc.) |
+| `profiling` | ✅ implemented | Batch-enrich unanalyzed accounts via ProfileAnalyzer |
+| `monitoring` | ✅ implemented | Re-check follower counts for tracked accounts |
+| `engagement` | ✅ implemented | Like/follow to maintain organic appearance |
+| `content_engagement` | ✅ implemented | Browse, like, save, and LLM-analyze content items |
+| `own_account_monitoring` | ✅ implemented | Snapshot own account follower counts |
+| `story_viewing` | ⏳ not_implemented | Watch stories from followed accounts |
+| `auto_unfollow` | ⏳ not_implemented | Unfollow non-reciprocal follows >7 days old |
+| `comment_engagement` | ⏳ not_implemented | Leave genuine comments (disabled by default) |
+
+**Recommended primary strategies**: `feed_browsing`, `reel_browsing`, `explore_browsing` — these mimic real user behavior and account for most sessions.
 
 **Recommended**: `graphql_suggestions,cascade` — these two strategies combined can find 200+ related accounts in under 2 minutes.
 
@@ -126,12 +140,31 @@ db.upsert_accounts(ProfileAnalyzer.to_dicts(profiles))
 cdp.close()
 ```
 
+## Database & Migration
+
+The async SQLite schema lives in `src/igautomation/db/schema.py`:
+
+- **11 tables**: `accounts`, `discovery_events`, `interaction_log`, `follower_snapshots`, `sessions`, `analysis_log`, `content_items`, `content_engagement_log`, `collections`, `content_collections`, `ig_accounts`
+- **Migration tracking**: `schema_migrations` table tracks applied migration names. Named migrations (`001_initial` through `005_ig_account_extras`) are listed in `schema.MIGRATIONS` and applied idempotently via `AsyncDatabaseStore.run_migrations()`.
+- **Legacy import**: `python -m igautomation.migrate` migrates from old flat-file schema to current.
+
+```bash
+# Run pending migrations
+igx db migrate
+
+# Show DB stats
+igx db stats
+
+# Export to JSON
+igx db export
+```
+
 ## Output
 
-All results are saved to `./output/` by default:
+All results saved to `./output/` by default:
 - `accounts.json` — Full account data with metadata
 - `accounts.csv` — Spreadsheet-friendly export
-- `igautomation.db` — SQLite database for querying
+- `igautomation.db` — Main SQLite database (async, via aiosqlite)
 
 ## Requirements
 
@@ -157,38 +190,42 @@ igx daemon status
 igx daemon stop
 ```
 
-### Cron
+### Cron (4 default jobs)
 
-List, install, and remove cron jobs for scheduled analysis:
+List, install, and remove cron jobs for scheduled analysis. Managed block wrapped in `# BEGIN/END igautomation managed cron` markers:
+
+| Job | Schedule | Description |
+|---|---|---|
+| `quality_analysis` | Every 6h | Quality review |
+| `strategy_analysis` | Every 12h | Strategy optimization |
+| `tier_analysis` | Daily 4AM UTC | Tier analysis |
+| `db_export` | Weekly Sun 5AM UTC | Weekly backup export |
 
 ```bash
-# Show current cron jobs
-igx daemon cron-show
-
-# Show next run times
-igx daemon cron-next
-
-# Install cron jobs (adds managed block to crontab)
-igx daemon cron-install
-
-# Remove managed cron block
-igx daemon cron-uninstall
-
-# Preview without modifying
-igx daemon cron-install --dry-run
+igx daemon cron-show            # Show configured jobs
+igx daemon cron-next            # Show next run times
+igx daemon cron-install         # Install managed block to crontab
+igx daemon cron-uninstall       # Remove managed block
+igx daemon cron-install --dry-run  # Preview without modifying
 ```
+
+Crontab entries log to `logs/<job_name>.log` in the project directory and use `igx` CLI via `uv run`.
 
 ### Systemd
 
-Generate and install a systemd user service:
-
 ```bash
-# Show service file content
-igx daemon service-show
-
-# Install service file to ~/.config/systemd/user/
-igx daemon service-install
-
-# Remove service file
-igx daemon service-uninstall
+igx daemon service-show         # Show service file
+igx daemon service-install      # Install to ~/.config/systemd/user/
+igx daemon service-uninstall    # Remove service file
 ```
+
+Default service: runs `igx daemon start --foreground --db igautomation.db`, auto-restarts on failure with 60s delay, installed as a user service (`systemctl --user`).
+
+### Safe Defaults
+
+- **Cooldown**: 10-60 min random jitter between sessions (configurable in `DaemonConfig`)
+- **Sleep window**: no sessions 6pm-1am UTC by default
+- **Session skip**: 5% probability to skip any session (human-like)
+- **Account cooldown**: 30 min between sessions on same account
+- **Daily session limit**: 5-10 sessions/day default schedule
+- **Comment engagement**: disabled by default (`comment_enabled: false`)

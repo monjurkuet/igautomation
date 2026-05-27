@@ -250,7 +250,7 @@ class TestStaleSessionCleanup:
             daemon = DaemonLoop(config)
 
             with patch.object(daemon, "_connect_cdp", return_value=None):
-                result = await daemon._run_one_session("feed_browsing")
+                await daemon._run_one_session("feed_browsing")
 
             # Stale session should be cleaned — re-open DB to see committed changes
             await db.close()
