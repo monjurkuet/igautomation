@@ -40,13 +40,6 @@ def extract_page_context(cdp: CDPClient) -> dict[str, Any]:
     username, caption, hashtags, comments, likes, timestamps.
     Then parses that text to extract structured fields.
     """
-    # IG internal paths that are NOT usernames
-    _IG_PATHS = {
-        "explore", "direct", "p", "reel", "reels", "stories", "accounts",
-        "settings", "notifications", "help", "about", "blog", "jobs", "api",
-        "privacy", "terms", "legal", "developers", "topics", "locations",
-    }
-
     js = r"""
 (function() {
     var IG_PATHS = ["explore","direct","p","reel","reels","stories","accounts",
@@ -353,6 +346,7 @@ Respond with ONLY valid JSON, no other text."""
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3,
             "max_tokens": 500,
+            "stream": False,
         }).encode()
 
         req = urllib.request.Request(
@@ -383,10 +377,10 @@ Respond with ONLY valid JSON, no other text."""
         item.is_bd_relevant = analysis.get("is_bd_relevant", False)
         item.content_niche = (analysis.get("content_niche", "") or "").strip().lower()
 
-        # Also store the extracted context
-        item.notes = item.notes or ""
+        # Also store the extracted context (append to existing notes)
         if username:
-            item.notes = f"@{username}" + (f" | {caption[:100]}" if caption else "")
+            new_note = f"@{username}" + (f" | {caption[:100]}" if caption else "")
+            item.notes = (item.notes + " | " + new_note) if item.notes else new_note
 
         logger.info(
             "LLM analysis: %s → collection=%s, niche=%s, user=@%s",
@@ -400,7 +394,8 @@ Respond with ONLY valid JSON, no other text."""
         item.llm_analysis = f"LLM analysis unavailable: {exc}"
         # Still keep extracted context
         if username:
-            item.notes = f"@{username}" + (f" | {caption[:100]}" if caption else "")
+            new_note = f"@{username}" + (f" | {caption[:100]}" if caption else "")
+            item.notes = (item.notes + " | " + new_note) if item.notes else new_note
 
     return item
 
@@ -440,6 +435,7 @@ Respond with ONLY valid JSON, no other text."""
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3,
             "max_tokens": 500,
+            "stream": False,
         }).encode()
 
         req = urllib.request.Request(

@@ -140,16 +140,32 @@ class DaemonLoop:
                      self.config.db_path, self.config.llm_enabled)
 
         loop = asyncio.get_running_loop()
+        shutdown_event = asyncio.Event()
+
+        def _handle_shutdown() -> None:
+            self.stop()
+            shutdown_event.set()
+
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
-                loop.add_signal_handler(sig, self.stop)
+                loop.add_signal_handler(sig, _handle_shutdown)
             except (NotImplementedError, RuntimeError):
                 logger.debug("Signal handler not supported on this platform")
+
+        async def _interruptible_sleep(seconds: float) -> None:
+            if shutdown_event.is_set():
+                shutdown_event.clear()
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=seconds)
+            except asyncio.TimeoutError:
+                pass
 
         while self._running:
             if self._is_sleep_time():
                 logger.info("Sleep hours — waiting 10 min")
-                await asyncio.sleep(600)
+                await _interruptible_sleep(600)
+                if not self._running:
+                    break
                 continue
 
             now_date = datetime.now(timezone.utc).date().isoformat()
@@ -160,13 +176,17 @@ class DaemonLoop:
             if self._sessions_today >= self.config.max_sessions_per_day:
                 logger.info("Daily session limit reached (%d), sleeping 1h",
                             self._sessions_today)
-                await asyncio.sleep(3600)
+                await _interruptible_sleep(3600)
+                if not self._running:
+                    break
                 continue
 
             if random.random() < self.config.skip_session_probability:
                 skip_time = random.randint(300, 1800)
                 logger.info("Random session skip — waiting %d min", skip_time // 60)
-                await asyncio.sleep(skip_time)
+                await _interruptible_sleep(skip_time)
+                if not self._running:
+                    break
                 continue
 
             result = await self._run_one_session()
@@ -185,7 +205,9 @@ class DaemonLoop:
 
             wait_time = self._scheduler.seconds_until_next()
             logger.info("Session cooldown — %d min", wait_time // 60)
-            await asyncio.sleep(wait_time)
+            await _interruptible_sleep(wait_time)
+
+        logger.info("Daemon stopped")
 
     async def _run_one_session(self, force_strategy: str | None = None) -> dict[str, Any]:
         """Execute a single daemon session.

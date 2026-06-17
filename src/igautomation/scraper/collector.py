@@ -25,7 +25,7 @@ import logging
 import time
 from typing import Callable, TYPE_CHECKING
 
-from igautomation.cdp.client import CDPClient, SKIP_USERNAMES
+from igautomation.cdp.client import CDPClient, SKIP_USERNAMES, _USERNAME_RE
 from igautomation.cdp.discovery import TabDiscovery
 from igautomation.graphql.client import GraphQLClient
 
@@ -303,6 +303,8 @@ class AccountCollector:
         if username.lower() in SKIP_USERNAMES:
             return
         if len(username) < 2:
+            return
+        if not _USERNAME_RE.match(username):
             return
         self._accounts.add(username)
 

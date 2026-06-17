@@ -149,8 +149,8 @@ Respond in JSON: {{"strategy": "...", "params": {{...}}, "rationale": "..."}}"""
             self.llm_model = llm_cfg.model
 
         if self.llm_api_key:
-            logger.info("LLM config loaded from environment (key=%s…, model=%s)",
-                         self.llm_api_key[:6], self.llm_model)
+            logger.info("LLM config loaded from environment (key=present, model=%s)",
+                         self.llm_model)
 
 
 # -----------------------------------------------------------------------

@@ -47,12 +47,6 @@ class GraphQLClient:
         self._cdp = cdp
         self.rate_limited: bool = False
 
-    def _csrf_token(self) -> str:
-        """Read the csrftoken cookie from the browser."""
-        js = 'document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ""'
-        result = self._cdp.evaluate(js, timeout=5)
-        return result or ""
-
     # ------------------------------------------------------------------
     # Internal: GraphQL via POST
     # ------------------------------------------------------------------

@@ -373,30 +373,39 @@ class AsyncDatabaseStore:
         self,
         analysis_type: str,
         summary: str,
-        findings: str = "[]",
-        recommendations: str = "[]",
-        metrics: str = "{}",
+        findings: list[dict] | str = "[]",
+        recommendations: list[dict] | str = "[]",
+        metrics: dict | str = "{}",
         model_used: str | None = None,
     ) -> int:
         """Record a session-level (dashboard) LLM analysis result.
 
         Uses account_id=0 as a sentinel for session-level analyses
         (quality reviews, strategy optimization, tier analysis).
+
+        Accepts findings/recommendations/metrics as either pre-serialized
+        JSON strings OR native Python objects.
         """
+        def _ensure_serialized(value: object) -> object:
+            if not isinstance(value, str):
+                return value
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                return value
+
+        result_payload = {
+            "findings": _ensure_serialized(findings),
+            "recommendations": _ensure_serialized(recommendations),
+            "metrics": _ensure_serialized(metrics),
+        }
+
         cur = await self.db.execute(
             """
             INSERT INTO analysis_log (account_id, analysis_type, prompt_summary, result, model_used)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (0, analysis_type, summary, json.dumps({
-                "findings": findings,
-                "recommendations": recommendations,
-                "metrics": metrics,
-            }) if not findings.startswith("[") else json.dumps({
-                "findings": json.loads(findings) if isinstance(findings, str) else findings,
-                "recommendations": json.loads(recommendations) if isinstance(recommendations, str) else recommendations,
-                "metrics": json.loads(metrics) if isinstance(metrics, str) else metrics,
-            }), model_used),
+            (0, analysis_type, summary, json.dumps(result_payload), model_used),
         )
         await self.db.commit()
         return cur.lastrowid  # type: ignore[return-value]

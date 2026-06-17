@@ -218,7 +218,9 @@ class SessionScheduler:
         tomorrow = now + timedelta(days=1)
         self.generate_daily_slots(tomorrow)
         self._slot_index = 0
-        return self._slots[0]
+        if self._slots:
+            return self._slots[0]
+        return now + timedelta(seconds=3600)
 
     def seconds_until_next(self) -> float:
         """Convenience: seconds from now until the next slot."""

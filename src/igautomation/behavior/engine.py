@@ -9,13 +9,14 @@ Every action method:
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 import time
 from typing import Callable
 
 from igautomation.behavior.config import BehaviorConfig, SessionConfig
-from igautomation.cdp.client import CDPClient
+from igautomation.cdp.client import CDPClient, SKIP_USERNAMES
 from igautomation.graphql.client import GraphQLClient
 
 logger = logging.getLogger(__name__)
@@ -116,13 +117,10 @@ class BehaviorEngine:
         Returns dict: posts (list of dicts with url/username/likes),
         usernames (list of str), scrolls_done (int)
         """
-        import json as _json
-
         self._delay()
         all_posts: list[dict] = []
         seen_urls: set[str] = set()
         all_usernames: set[str] = set()
-        _SKIP = {"explore", "reels", "direct", "accounts", "p", "tv", "reel"}
         scrolls_done = 0
 
         for _ in range(max_scrolls):
@@ -150,15 +148,15 @@ class BehaviorEngine:
             raw = self._cdp.evaluate(extract_js, timeout=10)
             if raw:
                 try:
-                    for p in _json.loads(raw):
+                    for p in json.loads(raw):
                         url = p.get("url", "")
                         if url and url not in seen_urls:
                             seen_urls.add(url)
                             all_posts.append(p)
                             uname = p.get("username", "")
-                            if uname and uname not in _SKIP:
+                            if uname and uname not in SKIP_USERNAMES:
                                 all_usernames.add(uname)
-                except (_json.JSONDecodeError, TypeError):
+                except (json.JSONDecodeError, TypeError):
                     pass
 
             self._cdp.evaluate("window.scrollBy(0, window.innerHeight * 0.8)", timeout=5)
@@ -174,8 +172,6 @@ class BehaviorEngine:
 
         Returns dict: reels (list of dicts), scrolls_done (int)
         """
-        import json as _json
-
         self._delay()
         self._cdp.navigate("https://www.instagram.com/reels/", wait=4)
         time.sleep(2)
@@ -214,12 +210,12 @@ class BehaviorEngine:
             raw = self._cdp.evaluate(extract_js, timeout=10)
             if raw:
                 try:
-                    reel = _json.loads(raw)
+                    reel = json.loads(raw)
                     url = reel.get("url", "")
                     if url and url not in seen_urls:
                         seen_urls.add(url)
                         all_reels.append(reel)
-                except (_json.JSONDecodeError, TypeError):
+                except (json.JSONDecodeError, TypeError):
                     pass
 
             watch_time = random.uniform(3.0, 12.0)
@@ -240,8 +236,6 @@ class BehaviorEngine:
 
         Returns dict: posts (list of dicts), usernames (list of str), scrolls_done (int)
         """
-        import json as _json
-
         self._delay()
         self._cdp.navigate("https://www.instagram.com/explore/", wait=5)
         time.sleep(2)
@@ -249,7 +243,6 @@ class BehaviorEngine:
         all_posts: list[dict] = []
         seen_urls: set[str] = set()
         all_usernames: set[str] = set()
-        _SKIP = {"explore", "reels", "direct", "accounts", "p", "tv", "reel"}
         scrolls_done = 0
 
         for _ in range(max_scrolls):
@@ -277,15 +270,15 @@ class BehaviorEngine:
             raw = self._cdp.evaluate(extract_js, timeout=10)
             if raw:
                 try:
-                    for p in _json.loads(raw):
+                    for p in json.loads(raw):
                         url = p.get("url", "")
                         if url and url not in seen_urls:
                             seen_urls.add(url)
                             all_posts.append(p)
                             uname = p.get("username", "")
-                            if uname and uname not in _SKIP:
+                            if uname and uname not in SKIP_USERNAMES:
                                 all_usernames.add(uname)
-                except (_json.JSONDecodeError, TypeError):
+                except (json.JSONDecodeError, TypeError):
                     pass
 
             self._cdp.evaluate("window.scrollBy(0, window.innerHeight * 0.8)", timeout=5)
