@@ -87,9 +87,10 @@ async def test_get_accounts_by_tier(store):
 
 
 async def test_get_unanalyzed_accounts(store):
+    # Account with no follower_count = unanalyzed (never profiled)
     await store.upsert_account({"username": "no_analysis", "relevance_score": 0.8})
-    a2 = await store.upsert_account({"username": "has_analysis", "relevance_score": 0.9})
-    await store.add_analysis(a2, "relevance", result="high")
+    # Account with follower_count = analyzed (has been profiled)
+    await store.upsert_account({"username": "has_analysis", "relevance_score": 0.9, "follower_count": 100})
     unanalyzed = await store.get_unanalyzed_accounts(limit=10)
     assert len(unanalyzed) == 1
     assert unanalyzed[0]["username"] == "no_analysis"

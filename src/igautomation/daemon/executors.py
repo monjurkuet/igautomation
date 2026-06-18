@@ -57,8 +57,12 @@ async def execute_feed_browsing(
         try:
             existing = await db.get_account_by_username(username)
             if not existing:
-                await db.upsert_account({"username": username})
+                account_id = await db.upsert_account({"username": username})
                 new_accounts += 1
+                await db.add_discovery_event(
+                    account_id=account_id, strategy="feed_browsing",
+                    source_username=None, query_text="feed_scroll",
+                )
         except Exception:
             logger.debug("Failed to upsert account %s", username)
     stats["accounts_discovered"] = new_accounts
@@ -98,8 +102,12 @@ async def execute_reel_browsing(
         try:
             existing = await db.get_account_by_username(username)
             if not existing:
-                await db.upsert_account({"username": username})
+                account_id = await db.upsert_account({"username": username})
                 new_accounts += 1
+                await db.add_discovery_event(
+                    account_id=account_id, strategy="reel_browsing",
+                    source_username=None, query_text="reel_scroll",
+                )
         except Exception:
             logger.debug("Failed to upsert reel account %s", username)
     stats["accounts_discovered"] = new_accounts
@@ -138,8 +146,12 @@ async def execute_explore_browsing(
         try:
             existing = await db.get_account_by_username(username)
             if not existing:
-                await db.upsert_account({"username": username})
+                account_id = await db.upsert_account({"username": username})
                 new_accounts += 1
+                await db.add_discovery_event(
+                    account_id=account_id, strategy="explore_browsing",
+                    source_username=None, query_text="explore_scroll",
+                )
         except Exception:
             logger.debug("Failed to upsert explore account %s", username)
     stats["accounts_discovered"] = new_accounts
@@ -195,29 +207,51 @@ async def execute_profiling(
         logger.info("No accounts needing profiling")
         return
     usernames = [a["username"] for a in unanalyzed]
-    logger.info("Profiling %d accounts", len(usernames))
-    if rate_limiter:
-        await rate_limiter.acquire()
+    logger.info("Profiling %d accounts (chunked)", len(usernames))
     analyzer = ProfileAnalyzer(cdp, graphql, engine)
-    try:
-        profiles = await run_blocking(analyzer.analyze, usernames)
-        if rate_limiter:
-            rate_limiter.record_success()
-    except Exception:
-        if rate_limiter:
-            rate_limiter.record_error("profile_api")
-        raise
-    for profile in profiles:
+    chunk_size = 10
+    all_profiles = []
+    for i in range(0, len(usernames), chunk_size):
+        chunk = usernames[i:i + chunk_size]
         try:
-            await db.upsert_account({
-                "username": profile.username, "full_name": profile.full_name,
-                "bio": profile.bio, "follower_count": profile.follower_count,
-                "following_count": profile.following_count, "post_count": profile.post_count,
-                "is_private": int(profile.is_private), "is_verified": int(profile.is_verified),
-                "tier": profile.tier, "category": profile.category,
-            })
-        except Exception as e:
-            logger.debug("Failed to save profile %s: %s", profile.username, e)
+            chunk_profiles = await asyncio.wait_for(
+                run_blocking(analyzer.analyze, chunk),
+                timeout=120,
+            )
+            all_profiles.extend(chunk_profiles)
+        except asyncio.TimeoutError:
+            logger.warning("Profiling chunk %d-%d timed out after 120s", i, i + chunk_size)
+            continue
+        except Exception as exc:
+            logger.warning("Profiling chunk %d-%d failed: %s", i, i + chunk_size, exc)
+            continue
+        # Async commit after each chunk so partial data is saved
+        for profile in chunk_profiles:
+            try:
+                await db.upsert_account({
+                    "username": profile.username, "full_name": profile.full_name,
+                    "bio": profile.bio, "follower_count": profile.follower_count,
+                    "following_count": profile.following_count, "post_count": profile.post_count,
+                    "is_private": int(profile.is_private), "is_verified": int(profile.is_verified),
+                    "tier": profile.tier, "category": profile.category,
+                })
+            except Exception as e:
+                logger.debug("Failed to save profile %s: %s", profile.username, e)
+        # Mark dead accounts in this chunk
+        chunk_usernames = {p.username for p in chunk_profiles}
+        for username in chunk:
+            if username not in chunk_usernames:
+                try:
+                    await db.upsert_account({
+                        "username": username,
+                        "follower_count": 0,
+                        "tier": "dead",
+                    })
+                except Exception:
+                    logger.debug("Failed to mark dead account %s", username)
+    profiles = all_profiles
+    if rate_limiter:
+        rate_limiter.record_success()
     stats["accounts_profiled"] = len(profiles)
     stats["actions_taken"] = engine._session.profile_views_used
     try:
@@ -496,10 +530,17 @@ async def _inline_engagement(
                 if liked:
                     likes_done += 1
                     stats["actions_taken"] += 1
+                    stats.setdefault("likes_done", 0)
+                    stats["likes_done"] += 1
+                    # Log interaction to DB
                     try:
+                        if username:
+                            account = await db.get_account_by_username(username)
+                            if account:
+                                await db.log_interaction(account["id"], "like", url, current_session_id)
                         await db.update_content_engagement_status_by_url(url, "engaged")
                     except Exception:
-                        logger.debug("Failed to update content engagement status for %s", url)
+                        logger.debug("Failed to log like interaction for %s", url)
             except Exception:
                 logger.debug("Failed to like post %s", url)
         if follows_done < max_inline_follows and username and engine.can_follow() and random.random() < 0.1:
@@ -508,6 +549,8 @@ async def _inline_engagement(
                 if followed:
                     follows_done += 1
                     stats["actions_taken"] += 1
+                    stats.setdefault("follows_done", 0)
+                    stats["follows_done"] += 1
                     account = await db.get_account_by_username(username)
                     if account:
                         await db.log_interaction(account["id"], "follow", username, current_session_id)

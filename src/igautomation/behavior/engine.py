@@ -114,6 +114,12 @@ class BehaviorEngine:
     def browse_feed(self, max_scrolls: int = 15) -> dict:
         """Scroll the main feed, extracting post URLs, usernames, and metadata.
 
+        IG web feed uses virtual DOM — only 2 `<article>` elements rendered at
+        a time, and new content does NOT load without active user engagement
+        (likes, follows, profile views).  This method engages with visible
+        posts during scroll to trigger IG's content pipeline, and reloads
+        the feed page every few scrolls to get a fresh batch of posts.
+
         Returns dict: posts (list of dicts with url/username/likes),
         usernames (list of str), scrolls_done (int)
         """
@@ -122,22 +128,47 @@ class BehaviorEngine:
         seen_urls: set[str] = set()
         all_usernames: set[str] = set()
         scrolls_done = 0
+        likes_done = 0
+        max_inline_likes = max_scrolls // 2
 
-        for _ in range(max_scrolls):
+        for round_idx in range(max_scrolls):
             if self._session.is_exhausted():
                 break
 
+            # -- 0. Navigate/reload periodically so there's always content to extract --
+            if round_idx == 0:
+                # First iteration — make sure we're on the feed
+                self._cdp.navigate("https://www.instagram.com/", wait=3)
+                time.sleep(1.5)
+            elif round_idx > 0 and round_idx % 3 == 0:
+                # Every 3rd: reload to get a fresh batch of posts
+                logger.debug("browse_feed: reloading feed page for fresh content (round %d)", round_idx)
+                self._cdp.navigate("https://www.instagram.com/", wait=3)
+                time.sleep(1.5)
+
+            # -- 1. Extract currently rendered posts --
             extract_js = """(function() {
                 var results = [];
                 var links = document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]');
+                var seen = new Set();
                 links.forEach(function(a) {
                     var href = a.getAttribute('href') || '';
+                    if (seen.has(href)) return;
+                    seen.add(href);
                     var username = '';
                     var parent = a.closest('article, div[role="button"]');
                     if (parent) {
                         var userLinks = parent.querySelectorAll('a[href*="instagram.com/"]');
                         if (userLinks.length > 0) {
                             var m = userLinks[0].getAttribute('href').match(/instagram\\.com\\/([^/]+)/);
+                            if (m) username = m[1];
+                        }
+                    }
+                    // Also try sibling/adjacent structure for username
+                    if (!username) {
+                        var hdr = parent && parent.querySelector('header a, a[href^="/"]:not([href*="/p/"]):not([href*="/reel/"])');
+                        if (hdr) {
+                            var m = (hdr.getAttribute('href') || '').match(/^\\/([^/?]+)/);
                             if (m) username = m[1];
                         }
                     }
@@ -159,16 +190,43 @@ class BehaviorEngine:
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-            self._cdp.evaluate("window.scrollBy(0, window.innerHeight * 0.8)", timeout=5)
+            # -- 2. Like visible posts to signal engagement (triggers more content) --
+            if likes_done < max_inline_likes:
+                for post in all_posts[-2:]:  # try newest extracted posts
+                    url = post.get("url", "")
+                    if url and self.can_like():
+                        like_js = """(function() {
+                            var svg = document.querySelector('svg[aria-label="Like"]');
+                            if (svg) {
+                                var btn = svg.closest('button') || svg.parentElement;
+                                if (btn) { btn.click(); return true; }
+                            }
+                            return false;
+                        })()"""
+                        result = self._cdp.evaluate(like_js, timeout=5)
+                        if result == "true" or result is True:
+                            self._session.likes_used += 1
+                            self._daily_likes += 1
+                            likes_done += 1
+                            logger.debug("browse_feed: liked %s", url)
+                            time.sleep(random.uniform(1.0, 3.0))
+                            break
+
+            # -- 4. Scroll to trigger new content --
+            self._cdp.evaluate("window.scrollBy(0, window.innerHeight * 0.7)", timeout=5)
             time.sleep(self._config.scroll_delay())
             scrolls_done += 1
 
-        logger.info("browse_feed: %d posts, %d usernames, %d scrolls",
-                     len(all_posts), len(all_usernames), scrolls_done)
+        logger.info("browse_feed: %d posts, %d usernames, %d scrolls, %d likes",
+                     len(all_posts), len(all_usernames), scrolls_done, likes_done)
         return {"posts": all_posts, "usernames": list(all_usernames), "scrolls_done": scrolls_done}
 
     def browse_reels(self, max_reels: int = 20) -> dict:
-        """Swipe through the Reels tab, extracting reel URLs and metadata.
+        """Browse the Reels tab — watch reels, extract metadata, advance via page reloads.
+
+        The IG web /reels/ page shows only 2 reels stacked vertically and does
+        NOT load more on scroll (scrollHeight = viewport).  We extract what's
+        visible, engage with it, then reload the page to get a fresh batch.
 
         Returns dict: reels (list of dicts), scrolls_done (int)
         """
@@ -177,58 +235,126 @@ class BehaviorEngine:
         time.sleep(2)
 
         all_reels: list[dict] = []
-        seen_urls: set[str] = set()
+        seen_usernames: set[str] = set()
         scrolls_done = 0
+        likes_done = 0
+        max_inline_likes = max_reels // 3
 
-        for _ in range(max_reels):
+        for round_idx in range(max_reels):
             if self._session.is_exhausted():
                 break
             if not self._session.can_view_reel():
                 break
 
+            # -- Extract reels visible on the current page --
             extract_js = """(function() {
-                var r = {};
-                var links = document.querySelectorAll('a[href*="/reel/"]');
-                if (links.length > 0) {
-                    r.url = 'https://www.instagram.com' + links[links.length - 1].getAttribute('href');
-                }
-                var userLinks = document.querySelectorAll('a[href*="instagram.com/"]');
-                for (var i = 0; i < userLinks.length; i++) {
-                    var href = userLinks[i].getAttribute('href') || '';
-                    var m = href.match(/instagram\\.com\\/([^/?/]+)/);
-                    if (m && m[1] && !['reel','reels','p','explore','direct'].includes(m[1])) {
-                        r.username = m[1]; break;
+                var r = [];
+                // Extract usernames: look for a[href*=\"/reels/\"] that look like /username/reels/
+                var seen = new Set();
+                var reelLinks = document.querySelectorAll('a[href*=\"/reels/"]');
+                reelLinks.forEach(function(a) {
+                    var h = a.getAttribute('href') || '';
+                    var m = h.match(/^\\/([^/]+)\\/reels\\/$/);
+                    if (m && m[1]) {
+                        if (!seen.has(m[1])) {
+                            seen.add(m[1]);
+                            r.push({username: m[1], url: 'https://www.instagram.com/reel/'});
+                        }
+                    }
+                });
+                
+                // Also try: text nodes with "Follow" nearby
+                var allText = document.body.innerText;
+                var lines = allText.split('\\n');
+                for (var i = 0; i < lines.length - 2; i++) {
+                    var l = lines[i].trim();
+                    if (l && l.indexOf(' ') === -1 && l.length > 1 && l.length < 50
+                        && lines[i+1].trim() === '\\u2022'
+                        && lines[i+2].trim() === 'Follow'
+                        && !seen.has(l)) {
+                        seen.add(l);
+                        r.push({username: l, url: 'https://www.instagram.com/reel/'});
                     }
                 }
-                var spans = document.querySelectorAll('span[dir="auto"]');
-                for (var i = 0; i < spans.length; i++) {
-                    var t = spans[i].textContent.trim();
-                    if (t.length > 20 && t.length < 500) { r.caption = t; break; }
+                
+                // Look for caption text (lines between username and next reel)
+                var idx = 0;
+                for (var i = 0; i < lines.length - 2; i++) {
+                    if (seen.has(lines[i].trim()) && i+1 < lines.length) {
+                        // Caption is after the next few lines (audio, then hashtags, then caption)
+                        for (var j = i+1; j < Math.min(i + 8, lines.length); j++) {
+                            var t = lines[j].trim();
+                            if (t && t.length > 15 && t.length < 500 && !t.startsWith('#') && !t.match(/^[\\d,.]+$/)) {
+                                if (idx < r.length) {
+                                    if (!r[idx].caption) r[idx].caption = t;
+                                }
+                                break;
+                            }
+                        }
+                        // Second text after the numbers = the other reel
+                        idx++;
+                    }
                 }
                 return JSON.stringify(r);
             })()"""
             raw = self._cdp.evaluate(extract_js, timeout=10)
             if raw:
                 try:
-                    reel = json.loads(raw)
-                    url = reel.get("url", "")
-                    if url and url not in seen_urls:
-                        seen_urls.add(url)
-                        all_reels.append(reel)
+                    for reel in json.loads(raw):
+                        uname = reel.get("username", "")
+                        if uname and uname not in seen_usernames:
+                            seen_usernames.add(uname)
+                            # Construct a reel URL since we know the username (use their top reel)
+                            reel["url"] = f"https://www.instagram.com/{uname}/"
+                            all_reels.append(reel)
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-            watch_time = random.uniform(3.0, 12.0)
+            # -- Watch current reels — let them play --
+            watch_time = random.uniform(5.0, 12.0)
             time.sleep(watch_time)
             self._session.reel_views_used += 1
 
-            self._cdp.evaluate(
-                "window.scrollBy(0, window.innerHeight);", timeout=5,
+            # -- Like available reels --
+            if likes_done < max_inline_likes and self.can_like():
+                like_js = """(function() {
+                    var svg = document.querySelector('svg[aria-label="Like"]');
+                    if (svg) {
+                        var btn = svg.closest('button') || svg.parentElement;
+                        if (btn) { btn.click(); return true; }
+                    }
+                    return false;
+                })()"""
+                result = self._cdp.evaluate(like_js, timeout=5)
+                if result == "true" or result is True:
+                    self._session.likes_used += 1
+                    self._daily_likes += 1
+                    likes_done += 1
+                    time.sleep(random.uniform(1.0, 3.0))
+
+            # -- Advance: try keyboard first, then scroll, then page reload --
+            key_advanced = self._cdp.evaluate(
+                "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', keyCode: 40, bubbles: true})); true",
+                timeout=5,
             )
-            time.sleep(random.uniform(1.0, 3.0))
+            time.sleep(random.uniform(1.0, 2.0))
+
+            # Check if scrollHeight changed (new content loaded)
+            sh = self._cdp.evaluate("document.documentElement.scrollHeight", timeout=5)
+            if sh and int(sh) > 950:
+                # Content loaded — scroll down to it
+                self._cdp.evaluate("window.scrollBy(0, 700)", timeout=5)
+                time.sleep(random.uniform(1.0, 2.0))
+            else:
+                # No more content — reload page for a fresh batch
+                logger.debug("browse_reels: reloading reels page for fresh content (round %d)", round_idx)
+                self._cdp.navigate("https://www.instagram.com/reels/", wait=4)
+                time.sleep(2)
+
             scrolls_done += 1
 
-        logger.info("browse_reels: %d reels, %d swipes", len(all_reels), scrolls_done)
+        logger.info("browse_reels: %d reels, %d swipes, %d likes",
+                     len(all_reels), scrolls_done, likes_done)
         return {"reels": all_reels, "scrolls_done": scrolls_done}
 
     def browse_explore(self, max_scrolls: int = 10) -> dict:
@@ -245,21 +371,33 @@ class BehaviorEngine:
         all_usernames: set[str] = set()
         scrolls_done = 0
 
-        for _ in range(max_scrolls):
+        for round_idx in range(max_scrolls):
             if self._session.is_exhausted():
                 break
+
+            # -- Navigate/reload periodically so there's always content to extract --
+            if round_idx == 0:
+                self._cdp.navigate("https://www.instagram.com/explore/", wait=4)
+                time.sleep(1.5)
+            elif round_idx > 0 and round_idx % 3 == 0:
+                logger.debug("browse_explore: reloading explore page (round %d)", round_idx)
+                self._cdp.navigate("https://www.instagram.com/explore/", wait=4)
+                time.sleep(1.5)
 
             extract_js = """(function() {
                 var results = [];
                 var links = document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"], a[href*="/tv/"]');
+                var seen = new Set();
                 links.forEach(function(a) {
                     var href = a.getAttribute('href') || '';
+                    if (seen.has(href)) return;
+                    seen.add(href);
                     var username = '';
-                    var parent = a.closest('div');
+                    var parent = a.closest('main, section, article, div');
                     if (parent) {
-                        var userLinks = parent.querySelectorAll('a[href*="instagram.com/"]');
+                        var userLinks = parent.querySelectorAll('a[href^="/"]:not([href*="/p/"]):not([href*="/reel/"]):not([href*="/tv/"]):not([href*="/explore/"])');
                         if (userLinks.length > 0) {
-                            var m = userLinks[0].getAttribute('href').match(/instagram\\.com\\/([^/]+)/);
+                            var m = (userLinks[0].getAttribute('href') || '').match(/^\/([^/?]+)/);
                             if (m) username = m[1];
                         }
                     }

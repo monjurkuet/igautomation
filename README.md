@@ -223,9 +223,10 @@ Default service: runs `igx daemon start --foreground --db igautomation.db`, auto
 
 ### Safe Defaults
 
-- **Cooldown**: 10-60 min random jitter between sessions (configurable in `DaemonConfig`)
-- **Sleep window**: no sessions 6pm-1am UTC by default
+- **Cooldown**: 5-30 min between sessions (configurable in `DaemonConfig`)
+- **Sleep window**: no sessions 18:00-01:00 UTC (midnight-7am BDT)
 - **Session skip**: 5% probability to skip any session (human-like)
-- **Account cooldown**: 30 min between sessions on same account
-- **Daily session limit**: 5-10 sessions/day default schedule
+- **Account cooldown**: 10 min between sessions on same account
+- **Daily session limit**: 20-40 sessions/day (configurable)
+- **Cluster probability**: 40% chance of tight session clusters (checking phone repeatedly)
 - **Comment engagement**: disabled by default (`comment_enabled: false`)

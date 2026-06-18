@@ -237,11 +237,6 @@ class DaemonLoop:
             except Exception as e:
                 logger.debug("Stale session cleanup skipped: %s", e)
 
-            try:
-                await db.create_session(session_uuid)
-            except Exception:
-                logger.debug("Session creation skipped (table may not support it)")
-
             if force_strategy:
                 plan = SessionPlan(strategy=force_strategy)
             elif self.config.llm_enabled:
@@ -249,7 +244,24 @@ class DaemonLoop:
             else:
                 plan = self._get_fallback_plan()
 
+            # Enforce strategy diversity: if last 2 sessions were the same, override
+            if (
+                len(self._last_strategies) >= 2
+                and self._last_strategies[-1] == plan.strategy
+                and self._last_strategies[-2] == plan.strategy
+            ):
+                logger.info(
+                    "Diversity override: %s repeated 2x — using fallback",
+                    plan.strategy,
+                )
+                plan = self._get_fallback_plan()
+
             logger.info("Session plan: %s — %s", plan.strategy, plan.rationale or "no rationale")
+
+            try:
+                await db.create_session(session_uuid, strategy=plan.strategy)
+            except Exception:
+                logger.debug("Session creation skipped (table may not support it)")
 
             behavior_config = BehaviorConfig()
             session_config = behavior_config.new_session()
@@ -410,31 +422,31 @@ class DaemonLoop:
 
             return {
                 "total_accounts": total_accounts,
-                "bd_female_count": 0,
                 "tier_breakdown": tier_breakdown,
                 "sessions_today": self._sessions_today,
                 "discovery_stats": disc_str,
                 "stale_accounts": stale,
-                "follow_back_rate": 0,
                 "content_items": content_str,
                 "unanalyzed_count": unanalyzed_count,
                 "story_candidates": story_candidates,
                 "unfollow_candidates": unfollow_candidates,
+                "last_strategy": self._last_strategies[-1] if self._last_strategies else "none",
+                "last_2_strategies": ", ".join(self._last_strategies[-2:]) if len(self._last_strategies) >= 2 else "none",
             }
         except Exception as e:
             logger.warning("Failed to gather stats: %s", e)
             return {
                 "total_accounts": 0,
-                "bd_female_count": 0,
                 "tier_breakdown": "none",
                 "sessions_today": 0,
                 "discovery_stats": "none",
                 "stale_accounts": 0,
-                "follow_back_rate": 0,
                 "content_items": "none",
                 "unanalyzed_count": 0,
                 "story_candidates": 0,
                 "unfollow_candidates": 0,
+                "last_strategy": "none",
+                "last_2_strategies": "none",
             }
 
     async def _call_llm(self, prompt: str) -> str | None:
@@ -451,6 +463,7 @@ class DaemonLoop:
             ],
             "max_tokens": 500,
             "temperature": 0.7,
+            "stream": False,
         }).encode()
 
         headers = {
@@ -520,7 +533,11 @@ class DaemonLoop:
         return plan
 
     def _connect_cdp(self):
-        """Try to connect to Chrome via CDP."""
+        """Try to connect to Chrome via CDP.
+
+        If no Instagram tab is found, auto-navigates an existing
+        tab to instagram.com (auto-recovery from browser restarts).
+        """
         ports = self.config.ports
         if ports and len(ports) > 0:
             idx = self._account_index % len(ports)
@@ -532,11 +549,54 @@ class DaemonLoop:
             base = f"http://localhost:{port}"
         tab = TabDiscovery.find_ig_tab(base)
         if not tab:
-            logger.error("No Instagram tab found on port %d", port)
-            return None
+            # Auto-recovery: navigate an existing tab to Instagram
+            logger.info("No IG tab on port %d — attempting auto-navigate", port)
+            tab = self._auto_navigate_to_ig(base, port)
+            if not tab:
+                logger.error("No Instagram tab found on port %d (auto-navigate failed)", port)
+                return None
         cdp = CDPClient()
         cdp.connect(tab["webSocketDebuggerUrl"])
         return cdp
+
+    def _auto_navigate_to_ig(self, base: str, port: int) -> dict | None:
+        """Navigate an existing browser tab to instagram.com.
+
+        Returns the IG tab dict on success, None on failure.
+        """
+        import urllib.request as _urllib_request
+        try:
+            resp = _urllib_request.urlopen(f"{base}/json/list", timeout=5)
+            all_tabs = json.loads(resp.read())
+            # Pick a real http tab (not extensions, blobs, devtools)
+            real_tabs = [
+                t for t in all_tabs
+                if t.get("url", "").startswith("http")
+                and "chrome-extension" not in t.get("url", "")
+                and "blob:" not in t.get("url", "")
+                and "devtools" not in t.get("url", "")
+            ]
+            if not real_tabs:
+                logger.warning("No real tabs on port %d for auto-navigate", port)
+                return None
+            target = real_tabs[0]
+            cdp = CDPClient()
+            cdp.connect(target["webSocketDebuggerUrl"])
+            cdp.navigate("https://www.instagram.com/", wait=6)
+            login = cdp.evaluate(
+                'document.querySelector("svg[aria-label=Home]") ? "LOGGED_IN" : "NOT_LOGGED_IN"'
+            )
+            if login == "LOGGED_IN":
+                logger.info("Auto-navigated to IG on port %d — logged in", port)
+                # Re-discover the tab (URL changed after navigate)
+                ig_tab = TabDiscovery.find_ig_tab(base)
+                return ig_tab
+            else:
+                logger.warning("Auto-navigated to IG on port %d — NOT logged in", port)
+                return None
+        except Exception as e:
+            logger.warning("Auto-navigate to IG failed on port %d: %s", port, e)
+            return None
 
     def _is_sleep_time(self) -> bool:
         """Return True if current hour is within sleep window."""

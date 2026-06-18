@@ -8,19 +8,19 @@ def render_service(
     project_dir: str = "/root/projects/igautomation",
 ) -> str:
     return f"""[Unit]
-Description=igautomation daemon
+Description=IG Automation Daemon — organic Instagram engagement
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory={project_dir}
-ExecStart=uv run igx daemon start --foreground --db {db_path}
-Restart=on-failure
-RestartSec=60
+ExecStart={project_dir}/.venv/bin/python3 -m igautomation.daemon --db {db_path} --verbose
+Restart=always
+RestartSec=30
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
 """
 
 

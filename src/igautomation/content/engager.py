@@ -48,14 +48,10 @@ class ContentEngager:
         self._engine = BehaviorEngine(cdp, self._config, self._session)
 
     def _delay(self) -> None:
-        secs = self._config.action_delay()
-        logger.debug("content delay: %.2fs", secs)
-        time.sleep(secs)
+        self._engine._delay()
 
     def _dwell(self) -> None:
-        secs = self._config.read_dwell()
-        logger.debug("content dwell: %.2fs", secs)
-        time.sleep(secs)
+        self._engine._dwell()
 
     def engage_content(self, item: ContentItem) -> ContentEngagementResult:
         """Full organic engagement with a single content item.

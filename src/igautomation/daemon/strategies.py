@@ -34,22 +34,24 @@ class DaemonConfig(BaseModel):
 
     # Session scheduling
     max_sessions_per_day: int = 16
-    sleep_hours_start: int = 18 # No sessions midnight-7am BST (6pm-1am UTC)
+    # Active hours: 01:00-18:00 UTC = 07:00-00:00 BDT
+    # (sleep_hours_start=18 means daemon sleeps 18:00-01:00 UTC)
+    sleep_hours_start: int = 18  # No sessions 18:00-01:00 UTC (midnight-7am BDT)
     sleep_hours_end: int = 1
-    skip_session_probability: float = 0.05 # 5% chance to skip a session
+    skip_session_probability: float = 0.05  # 5% chance to skip a session
 
-    # Scheduler config — human-like session timing
-    schedule_min_sessions_per_day: int = 5
-    schedule_max_sessions_per_day: int = 10
-    schedule_wake_hour: int = 7
-    schedule_sleep_hour: int = 23
-    schedule_min_gap_minutes: int = 15
-    schedule_max_gap_minutes: int = 120
-    schedule_cluster_probability: float = 0.3
-    schedule_cluster_gap_minutes: int = 5
+    # Scheduler config — must align with active hours (01:00-18:00 UTC)
+    schedule_min_sessions_per_day: int = 20
+    schedule_max_sessions_per_day: int = 40
+    schedule_wake_hour: int = 1   # UTC — aligned with sleep_hours_end
+    schedule_sleep_hour: int = 18  # UTC — aligned with sleep_hours_start
+    schedule_min_gap_minutes: int = 5
+    schedule_max_gap_minutes: int = 30
+    schedule_cluster_probability: float = 0.4
+    schedule_cluster_gap_minutes: int = 3
 
     # Per-account cooldown (seconds) — skip accounts used within this window
-    account_cooldown_seconds: int = 1800  # 30 min between sessions on same account
+    account_cooldown_seconds: int = 600  # 10 min between sessions on same account
 
     # Auto-unfollow: days before unfollowing non-reciprocal follows
     unfollow_grace_days: int = 7
@@ -75,40 +77,37 @@ class DaemonConfig(BaseModel):
     llm_enabled: bool = True
     llm_planning_prompt: str = """You are an Instagram intelligence analyst. Current stats:
 - Total accounts in DB: {total_accounts}
-- BD female influencers: {bd_female_count}
 - By tier: {tier_breakdown}
 - Sessions today: {sessions_today}
 - Discovery success rates: {discovery_stats}
 - Accounts needing profile refresh: {stale_accounts}
-- Recent follow-back rate: {follow_back_rate}%
 - Content items by status: {content_items}
-- Unanalyzed accounts: {unanalyzed_count}
+- Unanalyzed accounts (no bio/profile data): {unanalyzed_count}
 - Accounts needing story viewing: {story_candidates}
 - Non-reciprocal follows older than 7 days: {unfollow_candidates}
+- Last session strategy: {last_strategy}
+- Last 2 session strategies: {last_2_strategies}
 
-Pick the next session's primary strategy and parameters. Options (ORDERED BY PRIORITY):
+Pick the next session's primary strategy and parameters. DECISION PRIORITY:
 
-PRIMARY — do these most often (like a real IG user):
-- feed_browsing (scroll main feed, harvest posts, like/save inline) — DEFAULT activity
-- reel_browsing (swipe through Reels tab, harvest reels, engage inline) — high-value, algorithmically curated
-- explore_browsing (browse trending/Explore tab) — discovery beyond feed
+1. If the last 3 strategies are ALL non-browsing (profiling, discovery, monitoring, engagement, content_engagement) → pick a browsing strategy (feed_browsing, reel_browsing, or explore_browsing) to collect fresh content.
 
-SECONDARY — do these when data needs attention:
-- profiling (batch of accounts needing enrichment) — only if unanalyzed > 100
-- content_engagement (browse, like, save, and LLM-analyze content) — if 200+ pending items
-- engagement (like/follow to maintain organic appearance) — if feed browsing wasn't done recently
+2. If unanalyzed accounts > 50 AND last session was NOT profiling AND at least 2 browsing sessions have happened since last profiling → profiling (enrich profiles: follower count, bio, tier)
 
-LOW FREQUENCY — do these occasionally:
-- discovery (which strategy, what seeds/queries) — only if <200 accounts tracked
-- monitoring (re-check follower counts for tracked accounts) — once every few hours
-- story_viewing (watch stories from followed accounts) — passive, low-risk
-- auto_unfollow (unfollow non-reciprocal follows >7 days old) — if candidates >10
-- comment_engagement (leave genuine comments on engaged posts) — max 1-2/day
-- own_account_monitoring (snapshot our own follower counts) — once daily
+3. If stale_accounts > 100 AND last session was NOT monitoring AND at least 1 browsing session since last monitoring → monitoring (refresh existing profile data)
 
-IMPORTANT: A real user checks their feed and reels throughout the day. Browsing is the DEFAULT strategy.
-Don't pick discovery or profiling unless there's a clear data gap. Diversify browsing across feed/reels/explore.
-If the last 2 sessions were both browsing, add one profiling or engagement session for variety.
+4. If pending content > 200 AND last session was NOT content_engagement → content_engagement (analyze + engage)
+
+5. If accounts with no interactions exist AND last session was NOT engagement → engagement (like/follow to build organic presence)
+
+6. If total accounts < 300 AND last session was NOT discovery → discovery (find new accounts to track)
+
+7. Otherwise → browse (rotate between feed_browsing, reel_browsing, explore_browsing)
+
+IMPORTANT: Browsing sessions (feed_browsing, reel_browsing, explore_browsing) are the PRIMARY data pipeline — they discover new content and accounts. Without them, the DB doesn't grow. Ensure at least 1 browsing session for every 2 non-browsing sessions.
+NEVER repeat the same strategy 3 times in a row. If last 2 sessions were the same strategy, pick a different one.
+Profile enrichment is important but not at the expense of all other data pipelines.
+After 2 profiling sessions, always pick a non-profiling strategy.
 
 Respond in JSON: {{"strategy": "...", "params": {{...}}, "rationale": "..."}}"""
 
@@ -176,24 +175,24 @@ class SessionPlan:
 
 # Default fallback plans — browsing-first, with secondary strategies mixed in
 FALLBACK_PLANS: list[SessionPlan] = [
-    SessionPlan(strategy="feed_browsing", params={"max_scrolls": 15}),
-    SessionPlan(strategy="reel_browsing", params={"max_reels": 20}),
-    SessionPlan(strategy="feed_browsing", params={"max_scrolls": 10}),
-    SessionPlan(strategy="explore_browsing", params={"max_scrolls": 10}),
-    SessionPlan(strategy="reel_browsing", params={"max_reels": 15}),
-    SessionPlan(strategy="feed_browsing", params={"max_scrolls": 12}),
     SessionPlan(strategy="profiling", params={"batch_size": 20}),
-    SessionPlan(strategy="reel_browsing", params={"max_reels": 10}),
-    SessionPlan(strategy="engagement", params={"max_likes": 5, "max_follows": 2}),
-    SessionPlan(strategy="explore_browsing", params={"max_scrolls": 8}),
-    SessionPlan(strategy="content_engagement", params={"max_items": 15, "analyze": True}),
-    SessionPlan(strategy="feed_browsing", params={"max_scrolls": 8}),
+    SessionPlan(strategy="reel_browsing", params={"max_reels": 20}),
     SessionPlan(strategy="monitoring", params={"max_accounts": 30}),
-    SessionPlan(strategy="story_viewing", params={"max_stories": 8}),
-    SessionPlan(strategy="reel_browsing", params={"max_reels": 12}),
-    SessionPlan(strategy="discovery", params={"strategies": ["feed_browse", "discover_people"]}),
-    SessionPlan(strategy="auto_unfollow", params={"max_unfollows": 5}),
-    SessionPlan(strategy="profiling", params={"batch_size": 15}),
-    SessionPlan(strategy="comment_engagement", params={"max_comments": 3}),
+    SessionPlan(strategy="explore_browsing", params={"max_scrolls": 10}),
+    SessionPlan(strategy="engagement", params={"max_likes": 5, "max_follows": 2}),
+    SessionPlan(strategy="content_engagement", params={"max_items": 10, "analyze": True}),
+    SessionPlan(strategy="feed_browsing", params={"max_scrolls": 15}),
     SessionPlan(strategy="own_account_monitoring", params={}),
+    SessionPlan(strategy="profiling", params={"batch_size": 15}),
+    SessionPlan(strategy="reel_browsing", params={"max_reels": 15}),
+    SessionPlan(strategy="monitoring", params={"max_accounts": 20}),
+    SessionPlan(strategy="discovery", params={"strategies": ["feed_browse", "discover_people"]}),
+    SessionPlan(strategy="explore_browsing", params={"max_scrolls": 8}),
+    SessionPlan(strategy="content_engagement", params={"max_items": 5, "analyze": False}),
+    SessionPlan(strategy="feed_browsing", params={"max_scrolls": 10}),
+    SessionPlan(strategy="engagement", params={"max_likes": 3, "max_follows": 1}),
+    SessionPlan(strategy="reel_browsing", params={"max_reels": 12}),
+    SessionPlan(strategy="profiling", params={"batch_size": 10}),
+    SessionPlan(strategy="comment_engagement", params={"max_comments": 3}),
+    SessionPlan(strategy="auto_unfollow", params={"max_unfollows": 5}),
 ]

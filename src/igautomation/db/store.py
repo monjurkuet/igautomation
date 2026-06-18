@@ -165,13 +165,30 @@ class AsyncDatabaseStore:
         return [dict(r) for r in rows]
 
     async def get_unanalyzed_accounts(self, limit: int = 50) -> list[dict]:
-        """Return accounts that have no entry in analysis_log."""
+        """Return accounts that have no follower_count (never profiled).
+
+        Prioritizes accounts with no profile data, then stale accounts.
+        """
         cur = await self.db.execute(
             """
             SELECT a.* FROM accounts a
-            LEFT JOIN analysis_log al ON a.id = al.account_id
-            WHERE al.id IS NULL
-            ORDER BY a.relevance_score DESC
+            WHERE a.follower_count IS NULL
+               AND (a.tier IS NULL OR a.tier != 'dead')
+            ORDER BY a.id ASC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = await cur.fetchall()
+        if rows:
+            return [dict(r) for r in rows]
+        # Fallback: accounts not checked in 24h
+        cur = await self.db.execute(
+            """
+            SELECT a.* FROM accounts a
+            WHERE a.last_checked_at IS NULL
+               OR a.last_checked_at < datetime('now', '-1 day')
+            ORDER BY a.last_checked_at ASC
             LIMIT ?
             """,
             (limit,),

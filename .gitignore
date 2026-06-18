@@ -33,3 +33,7 @@ daemon.pid
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+
+# Logs
+logs/
+*.log

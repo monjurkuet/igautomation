@@ -19,8 +19,8 @@ class TestSessionScheduleConfig:
         c = SessionScheduleConfig()
         assert c.min_sessions_per_day == 5
         assert c.max_sessions_per_day == 10
-        assert c.wake_hour == 7
-        assert c.sleep_hour == 23
+        assert c.wake_hour == 1     # UTC — aligned with daemon sleep_hours_end
+        assert c.sleep_hour == 18   # UTC — aligned with daemon sleep_hours_start
         assert c.min_gap_minutes == 15
         assert c.max_gap_minutes == 120
         assert c.cluster_probability == 0.3
@@ -178,8 +178,8 @@ class TestNextSlot:
 
 
 class TestActivityWeights:
-    def test_evening_peak_gets_more_sessions(self):
-        """With default weights, evening hours should get more sessions."""
+    def test_peak_hours_get_more_sessions(self):
+        """Verify activity weights bias session distribution toward peak hours."""
         config = SessionScheduleConfig(
             min_sessions_per_day=20,
             max_sessions_per_day=20,
@@ -187,21 +187,22 @@ class TestActivityWeights:
         )
         scheduler = SessionScheduler(config)
 
-        # Run multiple times to average out randomness
+        # Run with different seeds to get varied distributions
         hour_counts: dict[int, int] = {}
-        for _ in range(10):
-            random.seed(42)
+        for i in range(100):
+            random.seed(42 + i)
             date = datetime(2026, 5, 6, tzinfo=timezone.utc)
             slots = scheduler.generate_daily_slots(date)
             for slot in slots:
                 hour_counts[slot.hour] = hour_counts.get(slot.hour, 0) + 1
 
-        # Evening (19-22) should have more sessions than afternoon (15-17)
-        evening = sum(hour_counts.get(h, 0) for h in range(19, 23))
-        afternoon = sum(hour_counts.get(h, 0) for h in range(15, 18))
-        # This is probabilistic but with 20 sessions x 10 runs,
-        # evening should generally win
-        assert evening > afternoon
+        # Peak weights (0.9-1.0) at hours 8-10 should produce
+        # more sessions than low weights (0.3) at hours 4-5
+        peak = {8, 9, 10}
+        low = {4, 5}
+        peak_total = sum(hour_counts.get(h, 0) for h in peak)
+        low_total = sum(hour_counts.get(h, 0) for h in low)
+        assert peak_total > low_total, f"peak={peak_total} vs low={low_total}"
 
 
 # ------------------------------------------------------------------

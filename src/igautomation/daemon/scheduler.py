@@ -40,8 +40,9 @@ class SessionScheduleConfig(BaseModel):
     max_sessions_per_day: int = Field(10, ge=1, description="Maximum sessions per day")
 
     # Waking hours (UTC) — sessions only happen in this window
-    wake_hour: int = Field(7, ge=0, le=23, description="Hour (UTC) when sessions start")
-    sleep_hour: int = Field(23, ge=0, le=23, description="Hour (UTC) when sessions stop")
+    # Aligned with DaemonConfig: active 01:00-18:00 UTC
+    wake_hour: int = Field(1, ge=0, le=23, description="Hour (UTC) when sessions start")
+    sleep_hour: int = Field(18, ge=0, le=23, description="Hour (UTC) when sessions stop")
 
     # Inter-session gap (minutes)
     min_gap_minutes: int = Field(15, ge=1, description="Minimum minutes between sessions")
@@ -80,14 +81,14 @@ class SessionScheduleConfig(BaseModel):
         return v
 
     # Activity profile weights by hour (UTC) — higher weight = more likely
-    # to have a session in that hour. 7am-10am = morning check,
-    # 12pm-2pm = lunch, 7pm-11pm = evening scrolling.
+    # Map to BDT (UTC+6): 01:00=07:00BDT morning, 06:00=12:00BDT lunch,
+    # 12:00=18:00BDT evening peak, 17:00=23:00BDT late night
     activity_weights: dict[int, float] = Field(
         default_factory=lambda: {
-            7: 0.6, 8: 0.8, 9: 0.9, 10: 0.7,   # morning
-            11: 0.4, 12: 0.7, 13: 0.8, 14: 0.5,  # midday
-            15: 0.3, 16: 0.4, 17: 0.5, 18: 0.6,  # afternoon
-            19: 0.8, 20: 0.9, 21: 1.0, 22: 0.9,  # evening peak
+            1: 0.6, 2: 0.5, 3: 0.4, 4: 0.3, 5: 0.3, 6: 0.5,   # early BDT morning
+            7: 0.8, 8: 0.9, 9: 1.0, 10: 0.9,                     # BDT midday peak
+            11: 0.8, 12: 0.7, 13: 0.6, 14: 0.5,                  # BDT afternoon
+            15: 0.4, 16: 0.5, 17: 0.6,                            # BDT evening
         },
         description="Hour (UTC) → activity weight (higher = more sessions in that hour)",
     )
