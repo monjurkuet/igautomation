@@ -203,9 +203,14 @@ class DaemonLoop:
                     logger.warning("Auto-analysis failed: %s", e)
                 self._sessions_since_analysis = 0
 
-            wait_time = self._scheduler.seconds_until_next()
-            logger.info("Session cooldown — %d min", wait_time // 60)
-            await _interruptible_sleep(wait_time)
+            # CDP failure (no IG tab, auto-navigate failed) — short retry
+            if result.get("status") == "no_cdp":
+                logger.info("CDP failure — retrying in 60s")
+                await _interruptible_sleep(60)
+            else:
+                wait_time = self._scheduler.seconds_until_next()
+                logger.info("Session cooldown — %d min", wait_time // 60)
+                await _interruptible_sleep(wait_time)
 
         logger.info("Daemon stopped")
 
@@ -279,11 +284,32 @@ class DaemonLoop:
             }
 
             try:
-                cdp = self._connect_cdp()
-                if not cdp:
+                cdp_result = self._connect_cdp()
+                if not cdp_result or not cdp_result[0]:
                     stats["status"] = "no_cdp"
                     logger.error("No CDP connection available")
                     return stats
+
+                cdp, cdp_port = cdp_result
+
+                # Resolve ig_account_id from the port used
+                ig_account_id = None
+                try:
+                    cur = await db.db.execute(
+                        "SELECT id FROM ig_accounts WHERE port = ?", (cdp_port,)
+                    )
+                    row = await cur.fetchone()
+                    if row:
+                        ig_account_id = row["id"]
+                        await db.db.execute(
+                            "UPDATE sessions SET ig_account_id = ? WHERE session_uuid = ?",
+                            (ig_account_id, session_uuid),
+                        )
+                        await db.db.commit()
+                        logger.debug("Session %s using ig_account %d (port %d)",
+                                     session_uuid[:8], ig_account_id, cdp_port)
+                except Exception as e:
+                    logger.debug("Could not resolve ig_account for port %d: %s", cdp_port, e)
 
                 try:
                     graphql = GraphQLClient(cdp)
@@ -537,6 +563,8 @@ class DaemonLoop:
 
         If no Instagram tab is found, auto-navigates an existing
         tab to instagram.com (auto-recovery from browser restarts).
+
+        Returns (CDPClient, port) on success, (None, None) on failure.
         """
         ports = self.config.ports
         if ports and len(ports) > 0:
@@ -554,10 +582,10 @@ class DaemonLoop:
             tab = self._auto_navigate_to_ig(base, port)
             if not tab:
                 logger.error("No Instagram tab found on port %d (auto-navigate failed)", port)
-                return None
+                return None, None
         cdp = CDPClient()
         cdp.connect(tab["webSocketDebuggerUrl"])
-        return cdp
+        return cdp, port
 
     def _auto_navigate_to_ig(self, base: str, port: int) -> dict | None:
         """Navigate an existing browser tab to instagram.com.

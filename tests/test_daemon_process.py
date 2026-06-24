@@ -165,7 +165,7 @@ class TestServiceConfig:
 
     def test_includes_igx_command(self):
         svc = render_service(db_path="custom.db")
-        assert "igx daemon start --foreground --db custom.db" in svc
+        assert "python3 -m igautomation.daemon --db custom.db" in svc
 
     def test_includes_working_directory(self):
         svc = render_service(project_dir="/myproject")
@@ -173,8 +173,8 @@ class TestServiceConfig:
 
     def test_restart_on_failure(self):
         svc = render_service()
-        assert "Restart=on-failure" in svc
-        assert "RestartSec=60" in svc
+        assert "Restart=always" in svc
+        assert "RestartSec=30" in svc
 
     def test_file_name(self):
         assert service_file_name() == "igautomation-daemon.service"

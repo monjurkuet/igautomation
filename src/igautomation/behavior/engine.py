@@ -333,7 +333,7 @@ class BehaviorEngine:
                     time.sleep(random.uniform(1.0, 3.0))
 
             # -- Advance: try keyboard first, then scroll, then page reload --
-            key_advanced = self._cdp.evaluate(
+            _ = self._cdp.evaluate(
                 "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', keyCode: 40, bubbles: true})); true",
                 timeout=5,
             )

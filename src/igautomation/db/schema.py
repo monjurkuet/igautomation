@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     ended_at TEXT,
     actions_taken INTEGER DEFAULT 0,
     accounts_discovered INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'running'
+    status TEXT DEFAULT 'running',
+    ig_account_id INTEGER REFERENCES ig_accounts(id)
 );
 
 -- LLM analysis results
@@ -153,6 +154,29 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     name TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Per-account IG accounts (multi-account support)
+CREATE TABLE IF NOT EXISTS ig_accounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  port INTEGER UNIQUE NOT NULL,
+  username TEXT,
+  user_id TEXT,
+  full_name TEXT,
+  profile_pic_url TEXT,
+  is_private INTEGER DEFAULT 0,
+  is_verified INTEGER DEFAULT 0,
+  follower_count INTEGER DEFAULT 0,
+  follower_snapshot_at TEXT,
+  status TEXT DEFAULT 'active',
+  last_used_at TEXT,
+  daily_session_count INTEGER DEFAULT 0,
+  daily_reset_at TEXT,
+  cooldown_until TEXT,
+  preferred_strategies TEXT,
+  warmup_complete INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 INDEXES_SQL = """
@@ -178,6 +202,8 @@ CREATE INDEX IF NOT EXISTS idx_content_engagement_type ON content_engagement_log
 CREATE INDEX IF NOT EXISTS idx_collections_name ON collections(name);
 CREATE INDEX IF NOT EXISTS idx_content_collections_item ON content_collections(content_item_id);
 CREATE INDEX IF NOT EXISTS idx_content_collections_collection ON content_collections(collection_id);
+CREATE INDEX IF NOT EXISTS idx_ig_accounts_port ON ig_accounts(port);
+CREATE INDEX IF NOT EXISTS idx_ig_accounts_status ON ig_accounts(status);
 """
 
 # Named migrations for schema evolution.

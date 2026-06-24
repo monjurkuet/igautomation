@@ -1,6 +1,6 @@
-# Organic IG Intelligence Platform — Implementation Plan
+# Organic IG Intelligence — Implementation Plan
 
-> **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
+> **⚠️ Superseded**: This plan guided the Phase 0-7 implementation. The daemon now has 12 strategies (up from 4), schema is at `src/igautomation/db/schema.py` (not `storage/schema.py`), and LLM analysis was integrated. See `CODEBASE_KNOWLEDGE.md` for current state.
 
 **Goal:** Build an LLM-driven, daemonized Instagram intelligence platform that discovers, profiles, and monitors Bangladeshi female influencers at every tier — while mimicking organic human behavior to avoid detection.
 

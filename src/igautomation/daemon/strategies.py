@@ -195,4 +195,7 @@ FALLBACK_PLANS: list[SessionPlan] = [
     SessionPlan(strategy="profiling", params={"batch_size": 10}),
     SessionPlan(strategy="comment_engagement", params={"max_comments": 3}),
     SessionPlan(strategy="auto_unfollow", params={"max_unfollows": 5}),
+    SessionPlan(strategy="feed_browsing", params={"max_scrolls": 12}),
+    SessionPlan(strategy="reel_browsing", params={"max_reels": 18}),
+    SessionPlan(strategy="explore_browsing", params={"max_scrolls": 12}),
 ]

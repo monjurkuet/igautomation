@@ -335,11 +335,12 @@ class AsyncDatabaseStore:
     # sessions
     # ------------------------------------------------------------------
 
-    async def create_session(self, session_uuid: str, strategy: str = "discovery") -> int:
+    async def create_session(self, session_uuid: str, strategy: str = "discovery",
+                           ig_account_id: int | None = None) -> int:
         """Start a new daemon session record."""
         cur = await self.db.execute(
-            "INSERT INTO sessions (session_uuid, strategy) VALUES (?, ?)",
-            (session_uuid, strategy),
+            "INSERT INTO sessions (session_uuid, strategy, ig_account_id) VALUES (?, ?, ?)",
+            (session_uuid, strategy, ig_account_id),
         )
         await self.db.commit()
         return cur.lastrowid  # type: ignore[return-value]

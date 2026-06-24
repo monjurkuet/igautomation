@@ -2,7 +2,7 @@
 
 Instagram automation, exploration, and content-processing framework built on Chrome DevTools Protocol.
 
-**How it works**: igautomation connects to an already-running Chrome browser via `--remote-debugging-port=9224`, then uses CDP to execute JavaScript and `fetch()` calls inside the logged-in Instagram session. That gives it access to Instagram's internal APIs without separate login handling.
+**How it works**: igautomation connects to already-running Chrome browsers via CDP remote debugging ports (9222, 9224, 9225 by default), then uses CDP to execute JavaScript and `fetch()` calls inside the logged-in Instagram session. That gives it access to Instagram's internal APIs without separate login handling.
 
 ## Quick Start
 
@@ -50,6 +50,7 @@ igx analyze --input output/accounts.json
 ## Architecture
 
 ```
+navigate_ig.py              # 3-tier IG tab recovery (verify→navigate→createTarget)
 src/igautomation/
 ├── analysis/               # LLM analysis and strategy evaluation
 ├── behavior/               # Human-like browsing, rate limiting, session config
@@ -169,7 +170,7 @@ All results saved to `./output/` by default:
 ## Requirements
 
 - Python 3.11+
-- Chrome with `--remote-debugging-port=9224`
+- Chrome with `--remote-debugging-port` (9222, 9224, or 9225)
 - Instagram logged into that Chrome session
 
 ## Daemon
@@ -219,7 +220,19 @@ igx daemon service-install      # Install to ~/.config/systemd/user/
 igx daemon service-uninstall    # Remove service file
 ```
 
-Default service: runs `igx daemon start --foreground --db igautomation.db`, auto-restarts on failure with 60s delay, installed as a user service (`systemctl --user`).
+Default service: runs `igx daemon start --foreground --db igautomation.db`, auto-restarts on failure with 30s delay. Can be installed as a user service (`systemctl --user`) or system service (`/etc/systemd/system/`).
+
+### IG Tab Navigation & Recovery
+
+`navigate_ig.py` ensures every CDP port has a logged-in Instagram tab:
+
+| Tier | Action | When |
+|------|--------|------|
+| 1 | Verify existing IG tab + login | IG tab already present |
+| 2 | Navigate a real HTTP tab to IG | No IG tab but other tabs exist |
+| 3 | `Target.createTarget` via browser-level WS | No page tabs at all |
+
+Tier 3 uses the **browser-level** WebSocket URL (from `/json/version`), NOT a page-level WS — service workers and background pages can't issue browser-level CDP commands.
 
 ### Safe Defaults
 

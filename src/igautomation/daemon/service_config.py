@@ -14,7 +14,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory={project_dir}
-ExecStart={project_dir}/.venv/bin/python3 -m igautomation.daemon --db {db_path} --verbose
+ExecStart={project_dir}/.venv/bin/python3 -m igautomation.daemon --db {db_path}
 Restart=always
 RestartSec=30
 Environment=PYTHONUNBUFFERED=1

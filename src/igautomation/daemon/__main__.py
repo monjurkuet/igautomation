@@ -38,6 +38,9 @@ def main() -> None:
         format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
         datefmt="%H:%M:%S",
     )
+    # Suppress noisy per-query logging from aiosqlite and HTTP client
+    for noisy in ("aiosqlite", "urllib3.connectionpool", "websocket"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     cfg = DaemonConfig.from_yaml(args.config) if args.config else DaemonConfig()
     if args.db:

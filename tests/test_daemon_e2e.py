@@ -426,11 +426,14 @@ async def test_gather_stats_empty(config: DaemonConfig):
 
 @pytest.mark.asyncio
 async def test_call_llm_timeout(config: DaemonConfig):
-    """Verify _call_llm handles timeouts gracefully (via executor)."""
+    """Verify _call_llm handles network failures gracefully."""
+    import urllib.request as urlreq
+    config.llm_api_key = "sk-dummy"
+    config.llm_base_url = "http://localhost:9999"
     d = DaemonLoop(config)
-
-    # No API key configured — should fail fast without blocking
-    result = await d._call_llm("test prompt")
+    # Mock urlopen to raise — no real network call
+    with patch.object(urlreq, "urlopen", side_effect=OSError("Connection refused")):
+        result = await d._call_llm("test prompt")
     assert result is None
 
 

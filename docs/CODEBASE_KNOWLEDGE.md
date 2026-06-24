@@ -1,6 +1,6 @@
 ---
 name: igautomation
-description: Instagram automation framework via Chrome DevTools Protocol. Connect to logged-in Chrome on port 9224, execute JS/fetch for IG GraphQL APIs.
+description: Instagram automation framework via Chrome DevTools Protocol. Connect to logged-in Chrome on CDP ports 9222/9224/9225, execute JS/fetch for IG GraphQL APIs.
 version: 0.1.0
 project_path: ~/projects/igautomation
 cli: igx
@@ -20,6 +20,7 @@ cli: igx
 ## Architecture
 
 ```
+navigate_ig.py                  # 3-tier IG tab recovery (verify→navigate→createTarget)
 src/igautomation/
 ├── analysis/
 │   ├── __init__.py
@@ -40,14 +41,14 @@ src/igautomation/
 │   └── models.py                  # ContentItem, ContentType, EngagementStatus
 ├── daemon/
 │   ├── __init__.py
-│   ├── __main__.py                # `python -m igautomation.daemon` entry
-│   ├── loop.py                    # DaemonLoop — LLM-orchestrated main loop (545 lines)
+│   ├── __main__.py                # `python -m igautomation.daemon` entry (+ noisy logger suppression)
+│   ├── loop.py                    # DaemonLoop — LLM-orchestrated main loop, 3-tier CDP recovery
 │   ├── executors.py               # 12 strategy executors + strategy registry (543 lines)
 │   ├── strategies.py              # DaemonConfig + FALLBACK_PLANS + SessionPlan
 │   ├── scheduler.py               # SessionScheduler — human-like daily patterns
 │   ├── process.py                 # PID file helpers, process liveness
 │   ├── cron_config.py             # Cron config — 4 default jobs, render_crontab()
-│   ├── service_config.py          # systemd user service renderer
+│   ├── service_config.py          # systemd service renderer (--verbose removed from ExecStart)
 │   └── account_prober.py          # CDP port/account probe
 ├── db/
 │   ├── __init__.py
@@ -238,11 +239,14 @@ igx accounts refresh                        # Refresh account data
 
 ## Chrome Debug Port Conventions
 
-- **Port 9224** — dedicated to igautomation (IG-logged-in Chrome instance)
-- **Port 9222** — user's main daily-driver Chrome with Facebook (and other services) already logged in. **Always prefer port 9222 for browser_navigate tasks** when the user asks to browse Facebook or other sites where they're already logged in. Do NOT use Hermes's isolated browser for these tasks.
-- When restarting Chrome, always use `--remote-debugging-port=<PORT>`.
-- Chrome's debug port can get overwhelmed from aggressive cascade (too many rapid WS connections). Fix: `get_user_id` now uses web_profile_info API instead of page scraping (faster, no navigation).
-- **WSL2 mirrored mode**: CDP ports must use `localhost` (not `127.0.0.1`) from WSL — `localhost` routes via iphlpsvc to Windows; `127.0.0.1` goes to WSL loopback (no CDP). Always verify with `curl http://localhost:PORT/json/version`.
+- **Port 9224** — igautomation IG-logged-in Chrome instance
+- **Port 9222** — user's main daily-driver Chrome with Facebook (and other services) already logged in
+- **Port 9225** — additional Chrome instance
+- **All ports are Windows-hosted Chrome instances** — WSL2 accesses them via localhost forwarding. Managed by `sm-browser-watchdog` on Windows (polls every 15s, restarts unresponsive browsers). The `igautomation_watchdog.py` cron script handles IG tab recovery but cannot restart the browsers themselves (they run on Windows).
+- **`navigate_ig.py` 3-tier IG tab recovery**:
+  - Tier 1: verify existing IG tab + login status
+  - Tier 2: navigate a real HTTP tab to IG via `Page.navigate`
+  - Tier 3: create a fresh tab via `Target.createTarget` using the **browser-level** WebSocket URL (from `/json/version`), NOT a page-level WS — service workers and background pages can't issue browser-level CDP commands
 
 ## What's Verified Working
 

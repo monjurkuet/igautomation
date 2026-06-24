@@ -1,5 +1,7 @@
 # Active Browsing Overhaul — Implementation Plan
 
+> **⚠️ Superseded**: This plan guided the initial implementation. The strategy executors were extracted from `loop.py` into `executors.py` (strategy registry pattern). See current code and `CODEBASE_KNOWLEDGE.md` for actual implementation.
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** Transform igautomation from a mostly-idle scraper into an always-on IG power user that browses feeds/reels throughout the day, captures trending content organically, and engages with what it finds.
