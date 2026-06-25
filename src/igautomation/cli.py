@@ -162,7 +162,9 @@ def discover(
     collector.on_progress(on_progress)
 
     strategy_list = [s.strip() for s in strategies.split(",")]
-    console.print(f"[bold]Discovering accounts[/bold] (target: {count}, strategies: {strategy_list})")
+    console.print(
+        f"[bold]Discovering accounts[/bold] (target: {count}, strategies: {strategy_list})"
+    )
 
     accounts = collector.collect(
         seed_usernames=seeds,
@@ -217,7 +219,9 @@ def discover(
             console.print(table)
     else:
         store = JSONStore()
-        account_dicts = [{"username": u, "url": f"https://www.instagram.com/{u}/"} for u in accounts]
+        account_dicts = [
+            {"username": u, "url": f"https://www.instagram.com/{u}/"} for u in accounts
+        ]
         path = store.save(account_dicts, filename=output, extra={"user_ids": collector.user_ids})
         console.print(f"  Saved: {path}")
 
@@ -333,11 +337,15 @@ def analyze(
     profiles = analyzer.analyze(usernames)
 
     bd_models = ProfileAnalyzer.filter_bd_models(profiles)
-    console.print(f"\n[bold]Results:[/bold] {len(profiles)} verified, {len(bd_models)} BD/model matches")
+    console.print(
+        f"\n[bold]Results:[/bold] {len(profiles)} verified, {len(bd_models)} BD/model matches"
+    )
 
     if save_db:
+
         async def _save():
             from igautomation.db.store import AsyncDatabaseStore
+
             db = AsyncDatabaseStore("igautomation.db")
             await db.initialize()
             saved = 0
@@ -402,7 +410,11 @@ def analyze(
 def session(
     strategy: Annotated[
         str,
-        typer.Option("--strategy", "-s", help="Strategy: feed_browsing|reel_browsing|explore_browsing|discovery|profiling|monitoring|engagement|content_engagement"),
+        typer.Option(
+            "--strategy",
+            "-s",
+            help="Strategy: feed_browsing|reel_browsing|explore_browsing|discovery|profiling|monitoring|engagement|content_engagement",
+        ),
     ] = "feed_browsing",
     db_path: Annotated[
         str,
@@ -442,5 +454,3 @@ app.add_typer(db_app, name="db")
 app.add_typer(accounts_app, name="accounts")
 app.add_typer(content_app, name="content")
 app.add_typer(collections_app, name="collections")
-
-

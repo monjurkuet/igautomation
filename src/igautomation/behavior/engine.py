@@ -45,7 +45,7 @@ class BehaviorEngine:
         self._config = config
         self._session = session
 
-    # Daily counters — persist across sessions within a day.
+        # Daily counters — persist across sessions within a day.
         self._daily_likes: int = 0
         self._daily_follows: int = 0
         self._daily_profile_views: int = 0
@@ -142,7 +142,9 @@ class BehaviorEngine:
                 time.sleep(1.5)
             elif round_idx > 0 and round_idx % 3 == 0:
                 # Every 3rd: reload to get a fresh batch of posts
-                logger.debug("browse_feed: reloading feed page for fresh content (round %d)", round_idx)
+                logger.debug(
+                    "browse_feed: reloading feed page for fresh content (round %d)", round_idx
+                )
                 self._cdp.navigate("https://www.instagram.com/", wait=3)
                 time.sleep(1.5)
 
@@ -217,8 +219,13 @@ class BehaviorEngine:
             time.sleep(self._config.scroll_delay())
             scrolls_done += 1
 
-        logger.info("browse_feed: %d posts, %d usernames, %d scrolls, %d likes",
-                     len(all_posts), len(all_usernames), scrolls_done, likes_done)
+        logger.info(
+            "browse_feed: %d posts, %d usernames, %d scrolls, %d likes",
+            len(all_posts),
+            len(all_usernames),
+            scrolls_done,
+            likes_done,
+        )
         return {"posts": all_posts, "usernames": list(all_usernames), "scrolls_done": scrolls_done}
 
     def browse_reels(self, max_reels: int = 20) -> dict:
@@ -347,14 +354,17 @@ class BehaviorEngine:
                 time.sleep(random.uniform(1.0, 2.0))
             else:
                 # No more content — reload page for a fresh batch
-                logger.debug("browse_reels: reloading reels page for fresh content (round %d)", round_idx)
+                logger.debug(
+                    "browse_reels: reloading reels page for fresh content (round %d)", round_idx
+                )
                 self._cdp.navigate("https://www.instagram.com/reels/", wait=4)
                 time.sleep(2)
 
             scrolls_done += 1
 
-        logger.info("browse_reels: %d reels, %d swipes, %d likes",
-                     len(all_reels), scrolls_done, likes_done)
+        logger.info(
+            "browse_reels: %d reels, %d swipes, %d likes", len(all_reels), scrolls_done, likes_done
+        )
         return {"reels": all_reels, "scrolls_done": scrolls_done}
 
     def browse_explore(self, max_scrolls: int = 10) -> dict:
@@ -423,8 +433,12 @@ class BehaviorEngine:
             time.sleep(self._config.scroll_delay())
             scrolls_done += 1
 
-        logger.info("browse_explore: %d posts, %d usernames, %d scrolls",
-                     len(all_posts), len(all_usernames), scrolls_done)
+        logger.info(
+            "browse_explore: %d posts, %d usernames, %d scrolls",
+            len(all_posts),
+            len(all_usernames),
+            scrolls_done,
+        )
         return {"posts": all_posts, "usernames": list(all_usernames), "scrolls_done": scrolls_done}
 
     def view_profile(self, username: str) -> dict | None:
@@ -471,8 +485,6 @@ class BehaviorEngine:
         """
         raw = self._cdp.evaluate(js, timeout=10)
         if raw:
-            import json
-
             try:
                 data = json.loads(raw)
                 if "not found" in (data.get("title", "") + data.get("meta", "")).lower():
@@ -750,7 +762,10 @@ class BehaviorEngine:
 
         logger.info(
             "view_stories: @%s — %d segments (session=%d, daily=%d)",
-            username, viewed, self._session.story_views_used, self._daily_story_views,
+            username,
+            viewed,
+            self._session.story_views_used,
+            self._daily_story_views,
         )
         return viewed
 
@@ -821,7 +836,9 @@ class BehaviorEngine:
             self._daily_unfollows += 1
             logger.info(
                 "unfollow_user: @%s (session=%d, daily=%d)",
-                username, self._session.unfollows_used, self._daily_unfollows,
+                username,
+                self._session.unfollows_used,
+                self._daily_unfollows,
             )
             return True
 
@@ -867,6 +884,7 @@ class BehaviorEngine:
 
         # Type comment using execCommand (simulates real keyboard input)
         import json as _json
+
         safe_text = _json.dumps(comment_text)  # JSON-escape for JS string
         type_js = f"""(function() {{
             var ta = document.querySelector('textarea[aria-label*="comment"], textarea[placeholder*="comment"], form textarea');
@@ -911,7 +929,10 @@ class BehaviorEngine:
         self._daily_comments += 1
         logger.info(
             "comment_on_post: %s — '%s' (session=%d, daily=%d)",
-            post_url, comment_text[:30], self._session.comments_used, self._daily_comments,
+            post_url,
+            comment_text[:30],
+            self._session.comments_used,
+            self._daily_comments,
         )
         return True
 

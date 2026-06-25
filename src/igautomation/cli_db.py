@@ -1,4 +1,5 @@
 """Database CLI subcommands for igx."""
+
 from __future__ import annotations
 
 import asyncio
@@ -24,6 +25,7 @@ db_app = typer.Typer(
 
 def _now_iso() -> str:
     from datetime import datetime, timezone
+
     return datetime.now(timezone.utc).isoformat()
 
 

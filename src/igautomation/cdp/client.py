@@ -102,26 +102,27 @@ class CDPClient:
         if not url:
             raise RuntimeError("No WebSocket URL configured — call connect() first")
 
-        ws = websocket.WebSocket()
-        ws.settimeout(30)
         for attempt in range(3):
             try:
                 logger.debug(
                     "Opening WebSocket to %s (origin=%s, attempt=%d)",
-                    url, self._origin, attempt + 1,
+                    url,
+                    self._origin,
+                    attempt + 1,
                 )
+                ws = websocket.WebSocket()
+                ws.settimeout(30)
                 ws.connect(url, origin=self._origin)
                 return ws
             except Exception:
                 if attempt < 2:
-                    delay = 0.5 * (2 ** attempt)  # 0.5s, 1s
+                    delay = 0.5 * (2**attempt)  # 0.5s, 1s
                     logger.warning(
                         "WebSocket connect failed (attempt %d), retrying in %.1fs",
-                        attempt + 1, delay,
+                        attempt + 1,
+                        delay,
                     )
                     time.sleep(delay)
-                    ws = websocket.WebSocket()
-                    ws.settimeout(30)
                 else:
                     raise
 

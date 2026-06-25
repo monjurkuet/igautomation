@@ -1,7 +1,5 @@
 """Daemon configuration and strategy definitions."""
 
-from __future__ import annotations
-
 import logging
 import yaml
 from pathlib import Path
@@ -22,7 +20,6 @@ class DaemonConfig(BaseModel):
     # CDP — multi-port support
     cdp_port: int = 9224  # Legacy: used when ports is empty
     ports: list[int] = [9222, 9224, 9225]  # Active CDP ports for account rotation
-    account_rotation: str = "round_robin"  # round_robin | least_recently_used | random
 
     # Per-account strategy preferences (port → preferred strategies)
     account_strategies: dict[int, list[str]] = {}
@@ -33,7 +30,8 @@ class DaemonConfig(BaseModel):
     llm_model: str = "gemini-2.5-flash-lite"
 
     # Session scheduling
-    max_sessions_per_day: int = 16
+    max_sessions_per_day: int = 24
+    session_timeout_seconds: int = 1800  # Max per-session duration before forced abort (30 min)
     # Active hours: 01:00-18:00 UTC = 07:00-00:00 BDT
     # (sleep_hours_start=18 means daemon sleeps 18:00-01:00 UTC)
     sleep_hours_start: int = 18  # No sessions 18:00-01:00 UTC (midnight-7am BDT)
@@ -43,7 +41,7 @@ class DaemonConfig(BaseModel):
     # Scheduler config — must align with active hours (01:00-18:00 UTC)
     schedule_min_sessions_per_day: int = 20
     schedule_max_sessions_per_day: int = 40
-    schedule_wake_hour: int = 1   # UTC — aligned with sleep_hours_end
+    schedule_wake_hour: int = 1  # UTC — aligned with sleep_hours_end
     schedule_sleep_hour: int = 18  # UTC — aligned with sleep_hours_start
     schedule_min_gap_minutes: int = 5
     schedule_max_gap_minutes: int = 30
@@ -114,7 +112,7 @@ Respond in JSON: {{"strategy": "...", "params": {{...}}, "rationale": "..."}}"""
     model_config: dict[str, Any] = {"frozen": False}
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> DaemonConfig:
+    def from_yaml(cls, path: str | Path) -> "DaemonConfig":
         """Load config from a YAML file."""
         p = Path(path)
         if not p.exists():
@@ -148,13 +146,15 @@ Respond in JSON: {{"strategy": "...", "params": {{...}}, "rationale": "..."}}"""
             self.llm_model = llm_cfg.model
 
         if self.llm_api_key:
-            logger.info("LLM config loaded from environment (key=present, model=%s)",
-                         self.llm_model)
+            logger.info(
+                "LLM config loaded from environment (key=present, model=%s)", self.llm_model
+            )
 
 
 # -----------------------------------------------------------------------
 # Strategy types
 # -----------------------------------------------------------------------
+
 
 class SessionPlan:
     """A plan for a single daemon session, possibly LLM-generated."""
@@ -180,7 +180,7 @@ FALLBACK_PLANS: list[SessionPlan] = [
     SessionPlan(strategy="monitoring", params={"max_accounts": 30}),
     SessionPlan(strategy="explore_browsing", params={"max_scrolls": 10}),
     SessionPlan(strategy="engagement", params={"max_likes": 5, "max_follows": 2}),
-    SessionPlan(strategy="content_engagement", params={"max_items": 10, "analyze": True}),
+    SessionPlan(strategy="content_engagement", params={"max_items": 30, "analyze": True}),
     SessionPlan(strategy="feed_browsing", params={"max_scrolls": 15}),
     SessionPlan(strategy="own_account_monitoring", params={}),
     SessionPlan(strategy="profiling", params={"batch_size": 15}),
@@ -188,7 +188,7 @@ FALLBACK_PLANS: list[SessionPlan] = [
     SessionPlan(strategy="monitoring", params={"max_accounts": 20}),
     SessionPlan(strategy="discovery", params={"strategies": ["feed_browse", "discover_people"]}),
     SessionPlan(strategy="explore_browsing", params={"max_scrolls": 8}),
-    SessionPlan(strategy="content_engagement", params={"max_items": 5, "analyze": False}),
+    SessionPlan(strategy="content_engagement", params={"max_items": 30, "analyze": False}),
     SessionPlan(strategy="feed_browsing", params={"max_scrolls": 10}),
     SessionPlan(strategy="engagement", params={"max_likes": 3, "max_follows": 1}),
     SessionPlan(strategy="reel_browsing", params={"max_reels": 12}),

@@ -21,15 +21,11 @@ def main() -> None:
         prog="igautomation.daemon",
         description="IG intelligence daemon — runs organic sessions continuously",
     )
-    parser.add_argument(
-        "--config", "-c", default="", help="YAML config file path"
-    )
+    parser.add_argument("--config", "-c", default="", help="YAML config file path")
     parser.add_argument(
         "--db", default="igautomation.db", help="Database path (default: igautomation.db)"
     )
-    parser.add_argument(
-        "--verbose", "-V", action="store_true", help="Enable debug logging"
-    )
+    parser.add_argument("--verbose", "-V", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
 
     level = logging.DEBUG if args.verbose else logging.INFO
@@ -50,7 +46,9 @@ def main() -> None:
 
     logging.getLogger(__name__).info(
         "Starting daemon — db=%s, llm=%s, model=%s",
-        cfg.db_path, cfg.llm_enabled, cfg.llm_model,
+        cfg.db_path,
+        cfg.llm_enabled,
+        cfg.llm_model,
     )
     try:
         daemon.run_forever()

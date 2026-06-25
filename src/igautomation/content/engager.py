@@ -9,6 +9,7 @@ For each content item:
 6. Optionally add to a named collection
 7. Log everything to DB
 """
+
 from __future__ import annotations
 
 import json as _json
@@ -20,7 +21,10 @@ from igautomation.behavior.config import BehaviorConfig, SessionConfig
 from igautomation.behavior.engine import BehaviorEngine
 from igautomation.cdp.client import CDPClient
 from igautomation.content.models import (
-    ContentItem, ContentEngagementResult, EngagementStatus, ContentType,
+    ContentItem,
+    ContentEngagementResult,
+    EngagementStatus,
+    ContentType,
 )
 from igautomation.db.store import AsyncDatabaseStore
 
@@ -101,7 +105,9 @@ class ContentEngager:
             if item.llm_collection_suggestion:
                 collection_added = self._add_to_collection_via_js(item.llm_collection_suggestion)
                 result.collection = item.llm_collection_suggestion
-                result.collection_added = EngagementStatus.DONE if collection_added else EngagementStatus.FAILED
+                result.collection_added = (
+                    EngagementStatus.DONE if collection_added else EngagementStatus.FAILED
+                )
 
         except Exception as exc:
             result.error = str(exc)
@@ -262,9 +268,9 @@ class ContentEngager:
         """
         result = self._cdp.evaluate(js, timeout=15)
         if result in ("collection_added", "saved"):
-            logger.info("added to collection \'%s\'", collection_name)
+            logger.info("added to collection '%s'", collection_name)
             return True
-        logger.warning("could not add to collection \'%s\': %s", collection_name, result)
+        logger.warning("could not add to collection '%s': %s", collection_name, result)
         return False
 
     async def log_engagement(

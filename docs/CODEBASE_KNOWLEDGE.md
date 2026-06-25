@@ -17,10 +17,11 @@ cli: igx
 - **Deps**: websocket-client, requests, typer, rich, aiosqlite, pydantic, croniter, pyyaml; dev: pytest, pytest-asyncio, ruff
 - **Testing**: `pytest` with `asyncio_mode = "auto"` in pyproject.toml. **180 tests** across 11 test files (test_analysis, test_behavior_config, test_behavior_engine, test_browsing_integration, test_daemon, test_daemon_e2e, test_daemon_process, test_db_schema, test_rate_limiter, test_scheduler, test_tier_expansion)
 
+`navigate_ig.py` removed. 3-tier tab recovery logic now lives in the daemon loop directly.
+
 ## Architecture
 
 ```
-navigate_ig.py                  # 3-tier IG tab recovery (verify→navigate→createTarget)
 src/igautomation/
 ├── analysis/
 │   ├── __init__.py
@@ -184,12 +185,11 @@ igx accounts refresh                        # Refresh account data
 
 ### db/schema.py — Migration Tracking
 
-5 named migrations in `MIGRATIONS` list:
+4 named migrations in `MIGRATIONS` list:
 - `001_initial` — full schema + indexes
 - `002_growth_fields` — growth_rate, growth_status columns
 - `003_content_tables` — content_items, content_engagement_log, collections, content_collections
 - `004_ig_accounts_and_session_link` — ig_accounts table, session FK
-- `005_ig_account_extras` — historical no-op
 
 `schema_migrations` table records which migrations have been applied. `AsyncDatabaseStore.run_migrations()` iterates `MIGRATIONS`, skips already-applied names, executes new ones atomically. Fresh DBs get all migrations applied at once.
 
@@ -242,11 +242,7 @@ igx accounts refresh                        # Refresh account data
 - **Port 9224** — igautomation IG-logged-in Chrome instance
 - **Port 9222** — user's main daily-driver Chrome with Facebook (and other services) already logged in
 - **Port 9225** — additional Chrome instance
-- **All ports are Windows-hosted Chrome instances** — WSL2 accesses them via localhost forwarding. Managed by `sm-browser-watchdog` on Windows (polls every 15s, restarts unresponsive browsers). The `igautomation_watchdog.py` cron script handles IG tab recovery but cannot restart the browsers themselves (they run on Windows).
-- **`navigate_ig.py` 3-tier IG tab recovery**:
-  - Tier 1: verify existing IG tab + login status
-  - Tier 2: navigate a real HTTP tab to IG via `Page.navigate`
-  - Tier 3: create a fresh tab via `Target.createTarget` using the **browser-level** WebSocket URL (from `/json/version`), NOT a page-level WS — service workers and background pages can't issue browser-level CDP commands
+| **All ports are Windows-hosted Chrome instances** — WSL2 accesses them via localhost forwarding. Managed by `sm-browser-watchdog` on Windows. Tab recovery logic lives in the daemon loop.
 
 ## What's Verified Working
 
@@ -293,9 +289,7 @@ igx accounts refresh                        # Refresh account data
 
 ## Implementation Plan
 
-Full plan at `docs/plans/2026-05-05-organic-ig-intelligence.md` — 7 phases, 14 tasks.
-
-**All phases complete** ✅ — 119 tests passing, all 14 tasks done.
+Full plan removed from docs/plans/. All 7 phases complete ✅.
 
 ## New Modules (Phase 3-7, implemented)
 

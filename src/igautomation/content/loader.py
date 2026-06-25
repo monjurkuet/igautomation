@@ -1,4 +1,5 @@
 """Load seed content from CSV files into the database."""
+
 from __future__ import annotations
 
 import csv
@@ -83,7 +84,9 @@ def load_csv(path: str | Path) -> list[ContentItem]:
                     continue
                 seen_urls.add(url)
 
-                declared_type = row_dict.get("Content Type", row_dict.get("content_type", "")).strip().lower()
+                declared_type = (
+                    row_dict.get("Content Type", row_dict.get("content_type", "")).strip().lower()
+                )
                 ct = _map_csv_type(declared_type) if declared_type else detect_content_type(url)
 
                 try:
@@ -91,13 +94,15 @@ def load_csv(path: str | Path) -> list[ContentItem]:
                 except (ValueError, AttributeError):
                     priority = 5
 
-                items.append(ContentItem(
-                    url=url,
-                    content_type=ct,
-                    category=row_dict.get("Category", row_dict.get("category", "")).strip(),
-                    notes=row_dict.get("Notes", row_dict.get("notes", "")).strip(),
-                    priority=priority,
-                ))
+                items.append(
+                    ContentItem(
+                        url=url,
+                        content_type=ct,
+                        category=row_dict.get("Category", row_dict.get("category", "")).strip(),
+                        notes=row_dict.get("Notes", row_dict.get("notes", "")).strip(),
+                        priority=priority,
+                    )
+                )
 
     logger.info("Loaded %d content items from %s", len(items), path)
     return items

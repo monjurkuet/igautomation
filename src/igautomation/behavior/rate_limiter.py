@@ -145,8 +145,12 @@ class RateLimiter:
         elapsed = now - self._last_call_at
         wait = self._jittered_delay() - elapsed
         if wait > 0:
-            logger.debug("RateLimiter waiting %.2fs (delay=%.2fs, elapsed=%.2fs)",
-                         wait, self._current_delay, elapsed)
+            logger.debug(
+                "RateLimiter waiting %.2fs (delay=%.2fs, elapsed=%.2fs)",
+                wait,
+                self._current_delay,
+                elapsed,
+            )
             await asyncio.sleep(wait)
 
         self._last_call_at = time.monotonic()

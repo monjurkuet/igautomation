@@ -149,17 +149,19 @@ class Migrator:
                     else:
                         tier = "emerging"
 
-                    account_id = await new_db.upsert_account({
-                        "username": username,
-                        "user_id": old_user_ids.get(username),
-                        "full_name": acct.get("full_name", ""),
-                        "bio": acct.get("bio", ""),
-                        "follower_count": followers,
-                        "following_count": following,
-                        "post_count": posts,
-                        "category": category,
-                        "tier": tier,
-                    })
+                    account_id = await new_db.upsert_account(
+                        {
+                            "username": username,
+                            "user_id": old_user_ids.get(username),
+                            "full_name": acct.get("full_name", ""),
+                            "bio": acct.get("bio", ""),
+                            "follower_count": followers,
+                            "following_count": following,
+                            "post_count": posts,
+                            "category": category,
+                            "tier": tier,
+                        }
+                    )
                     self._stats["accounts_migrated"] += 1
 
                     # Create discovery event
@@ -202,17 +204,19 @@ class Migrator:
                     else:
                         tier = "emerging"
 
-                    account_id = await new_db.upsert_account({
-                        "username": username,
-                        "user_id": acct.get("user_id") or old_user_ids.get(username),
-                        "full_name": acct.get("full_name", ""),
-                        "bio": acct.get("bio", ""),
-                        "follower_count": followers,
-                        "following_count": following,
-                        "post_count": posts,
-                        "category": category,
-                        "tier": tier,
-                    })
+                    account_id = await new_db.upsert_account(
+                        {
+                            "username": username,
+                            "user_id": acct.get("user_id") or old_user_ids.get(username),
+                            "full_name": acct.get("full_name", ""),
+                            "bio": acct.get("bio", ""),
+                            "follower_count": followers,
+                            "following_count": following,
+                            "post_count": posts,
+                            "category": category,
+                            "tier": tier,
+                        }
+                    )
                     self._stats["json_accounts_migrated"] += 1
 
                     # Only add discovery event if this username wasn't already

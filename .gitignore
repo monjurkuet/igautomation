@@ -18,6 +18,7 @@ output/
 .idea/
 .vscode/
 *.swp
+.kilo/
 
 # OS
 .DS_Store

@@ -51,7 +51,8 @@ def probe_port(port: int, timeout: int = 15) -> ProbedAccount:
         # Try any real tab and navigate to IG
         tabs = TabDiscovery.list_tabs(base_url)
         real_tabs = [
-            t for t in tabs
+            t
+            for t in tabs
             if t.get("url", "").startswith("http")
             and "chrome-extension" not in t.get("url", "")
             and "blob:" not in t.get("url", "")
@@ -159,9 +160,7 @@ def probe_all_ports(ports: list[int]) -> list[ProbedAccount]:
         try:
             result = probe_port(port)
             if result.username:
-                logger.info(
-                    "Port %d: @%s (uid=%s)", port, result.username, result.user_id
-                )
+                logger.info("Port %d: @%s (uid=%s)", port, result.username, result.user_id)
             elif result.error:
                 logger.warning("Port %d: %s", port, result.error)
             results.append(result)

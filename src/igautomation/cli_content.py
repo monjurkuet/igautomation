@@ -1,4 +1,5 @@
 """Content and collections CLI subcommands for igx."""
+
 from __future__ import annotations
 
 import asyncio
@@ -72,13 +73,15 @@ def content_load(
         skipped = 0
         for item in items:
             try:
-                await store.upsert_content_item({
-                    "url": item.url.strip(),
-                    "content_type": item.content_type.value,
-                    "category": item.category,
-                    "notes": item.notes,
-                    "priority": item.priority,
-                })
+                await store.upsert_content_item(
+                    {
+                        "url": item.url.strip(),
+                        "content_type": item.content_type.value,
+                        "category": item.category,
+                        "notes": item.notes,
+                        "priority": item.priority,
+                    }
+                )
                 imported += 1
             except Exception as exc:
                 skipped += 1
@@ -95,9 +98,15 @@ def content_load(
 def content_analyze(
     db_path: Annotated[str, typer.Option("--db", help="SQLite database path")] = "igautomation.db",
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max items to analyze")] = 50,
-    delay: Annotated[float, typer.Option("--delay", help="Seconds between items (min human-like gap)")] = 2.0,
-    dwell: Annotated[float, typer.Option("--dwell", help="Seconds to dwell on each post (read/watch)")] = 3.0,
-    no_browser: Annotated[bool, typer.Option("--no-browser", help="Skip CDP browsing, use API-only analysis")] = False,
+    delay: Annotated[
+        float, typer.Option("--delay", help="Seconds between items (min human-like gap)")
+    ] = 2.0,
+    dwell: Annotated[
+        float, typer.Option("--dwell", help="Seconds to dwell on each post (read/watch)")
+    ] = 3.0,
+    no_browser: Annotated[
+        bool, typer.Option("--no-browser", help="Skip CDP browsing, use API-only analysis")
+    ] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Analyze pending content by browsing each post in Chrome, then LLM.
@@ -124,19 +133,22 @@ def content_analyze(
 
         items = []
         for row in rows:
-            items.append(ContentItem(
-                url=row["url"],
-                content_type=ContentType(row.get("content_type", "unknown") or "unknown"),
-                category=row.get("category", "") or "",
-                notes=row.get("notes", "") or "",
-                priority=row.get("priority", 5) or 5,
-            ))
+            items.append(
+                ContentItem(
+                    url=row["url"],
+                    content_type=ContentType(row.get("content_type", "unknown") or "unknown"),
+                    category=row.get("category", "") or "",
+                    notes=row.get("notes", "") or "",
+                    priority=row.get("priority", 5) or 5,
+                )
+            )
 
         # Connect to Chrome CDP for browser-based analysis
         cdp = None
         if not no_browser:
             try:
                 from igautomation.cdp.client import CDPClient
+
                 ig_tab = TabDiscovery.find_ig_tab()
                 if ig_tab:
                     cdp = CDPClient()
@@ -159,20 +171,23 @@ def content_analyze(
         updated = 0
         for item in analyzed:
             try:
-                await store.upsert_content_item({
-                    "url": item.url.strip(),
-                    "llm_analysis": item.llm_analysis,
-                    "llm_collection_suggestion": item.llm_collection_suggestion,
-                    "llm_tags": ", ".join(item.llm_tags),
-                    "is_bd_relevant": 1 if item.is_bd_relevant else 0,
-                    "content_niche": item.content_niche,
-                    "engagement_status": "analyzed",
-                })
+                await store.upsert_content_item(
+                    {
+                        "url": item.url.strip(),
+                        "llm_analysis": item.llm_analysis,
+                        "llm_collection_suggestion": item.llm_collection_suggestion,
+                        "llm_tags": ", ".join(item.llm_tags),
+                        "is_bd_relevant": 1 if item.is_bd_relevant else 0,
+                        "content_niche": item.content_niche,
+                        "engagement_status": "analyzed",
+                    }
+                )
 
                 if item.llm_collection_suggestion:
                     await store.upsert_collection(
                         name=item.llm_collection_suggestion,
-                        description="Auto-created collection for " + (item.content_niche or "content"),
+                        description="Auto-created collection for "
+                        + (item.content_niche or "content"),
                     )
 
                 updated += 1
@@ -194,6 +209,7 @@ def content_stats(
     db_path: Annotated[str, typer.Option("--db", help="SQLite database path")] = "igautomation.db",
 ) -> None:
     """Show content engagement statistics."""
+
     async def _run():
         store = AsyncDatabaseStore(db_path)
         await store.initialize()
@@ -250,7 +266,9 @@ def content_stats(
 def content_engage(
     db_path: Annotated[str, typer.Option("--db", help="SQLite database path")] = "igautomation.db",
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max items to engage")] = 20,
-    dry_run: Annotated[bool, typer.Option("--dry-run", help="Simulate without actual engagement")] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Simulate without actual engagement")
+    ] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Engage with analyzed content: like, save, add to collections."""
@@ -289,6 +307,7 @@ def content_engage(
             return None
 
         from igautomation.cdp.client import CDPClient
+
         cdp = CDPClient()
         cdp.connect(ig_tab["webSocketDebuggerUrl"])
         config = BehaviorConfig()
@@ -308,7 +327,7 @@ def content_engage(
                 content_niche=row.get("content_niche", "") or "",
             )
 
-            console.print(f"  [{i+1}/{len(rows)}] " + row["url"][:50] + "...")
+            console.print(f"  [{i + 1}/{len(rows)}] " + row["url"][:50] + "...")
             result = engager.engage_content(item)
             results.append((item, result))
 
@@ -344,6 +363,7 @@ def collections_list(
     db_path: Annotated[str, typer.Option("--db", help="SQLite database path")] = "igautomation.db",
 ) -> None:
     """List all collections and their item counts."""
+
     async def _run():
         store = AsyncDatabaseStore(db_path)
         await store.initialize()
@@ -374,6 +394,7 @@ def collections_create(
     db_path: Annotated[str, typer.Option("--db", help="SQLite database path")] = "igautomation.db",
 ) -> None:
     """Create a new collection in the database."""
+
     async def _run():
         store = AsyncDatabaseStore(db_path)
         await store.initialize()

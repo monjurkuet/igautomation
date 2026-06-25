@@ -28,8 +28,15 @@ async def run_blocking(func: Callable, *args: Any, **kwargs: Any) -> Any:
 
 
 async def execute_feed_browsing(
-    cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
-    *, rate_limiter: Any = None, current_session_id: str | None = None,
+    cdp,
+    graphql,
+    engine,
+    db: AsyncDatabaseStore,
+    plan: SessionPlan,
+    stats: dict,
+    *,
+    rate_limiter: Any = None,
+    current_session_id: str | None = None,
     config: Any = None,
 ) -> None:
     max_scrolls = plan.params.get("max_scrolls", 15)
@@ -45,11 +52,14 @@ async def execute_feed_browsing(
             continue
         try:
             ct = "reel" if "/reel/" in url else "post" if "/p/" in url else "unknown"
-            await db.upsert_content_item({
-                "url": url, "content_type": ct,
-                "owner_username": post.get("username", ""),
-                "engagement_status": "pending",
-            })
+            await db.upsert_content_item(
+                {
+                    "url": url,
+                    "content_type": ct,
+                    "owner_username": post.get("username", ""),
+                    "engagement_status": "pending",
+                }
+            )
         except Exception as e:
             logger.debug("Failed to save feed post %s: %s", url, e)
     new_accounts = 0
@@ -60,21 +70,35 @@ async def execute_feed_browsing(
                 account_id = await db.upsert_account({"username": username})
                 new_accounts += 1
                 await db.add_discovery_event(
-                    account_id=account_id, strategy="feed_browsing",
-                    source_username=None, query_text="feed_scroll",
+                    account_id=account_id,
+                    strategy="feed_browsing",
+                    source_username=None,
+                    query_text="feed_scroll",
                 )
         except Exception:
             logger.debug("Failed to upsert account %s", username)
     stats["accounts_discovered"] = new_accounts
     stats["posts_harvested"] = len(posts)
-    logger.info("Feed browsing: %d posts, %d usernames (%d new), %d scrolls",
-                 len(posts), len(usernames), new_accounts, result.get("scrolls_done", 0))
+    logger.info(
+        "Feed browsing: %d posts, %d usernames (%d new), %d scrolls",
+        len(posts),
+        len(usernames),
+        new_accounts,
+        result.get("scrolls_done", 0),
+    )
     await _inline_engagement(cdp, engine, db, posts, stats, current_session_id=current_session_id)
 
 
 async def execute_reel_browsing(
-    cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
-    *, rate_limiter: Any = None, current_session_id: str | None = None,
+    cdp,
+    graphql,
+    engine,
+    db: AsyncDatabaseStore,
+    plan: SessionPlan,
+    stats: dict,
+    *,
+    rate_limiter: Any = None,
+    current_session_id: str | None = None,
     config: Any = None,
 ) -> None:
     max_reels = plan.params.get("max_reels", 20)
@@ -86,12 +110,15 @@ async def execute_reel_browsing(
         if not url:
             continue
         try:
-            await db.upsert_content_item({
-                "url": url, "content_type": "reel",
-                "owner_username": reel.get("username", ""),
-                "caption": reel.get("caption", ""),
-                "engagement_status": "pending",
-            })
+            await db.upsert_content_item(
+                {
+                    "url": url,
+                    "content_type": "reel",
+                    "owner_username": reel.get("username", ""),
+                    "caption": reel.get("caption", ""),
+                    "engagement_status": "pending",
+                }
+            )
         except Exception as e:
             logger.debug("Failed to save reel %s: %s", url, e)
     new_accounts = 0
@@ -105,22 +132,39 @@ async def execute_reel_browsing(
                 account_id = await db.upsert_account({"username": username})
                 new_accounts += 1
                 await db.add_discovery_event(
-                    account_id=account_id, strategy="reel_browsing",
-                    source_username=None, query_text="reel_scroll",
+                    account_id=account_id,
+                    strategy="reel_browsing",
+                    source_username=None,
+                    query_text="reel_scroll",
                 )
         except Exception:
             logger.debug("Failed to upsert reel account %s", username)
     stats["accounts_discovered"] = new_accounts
     stats["reels_harvested"] = len(reels)
-    logger.info("Reel browsing: %d reels, %d new accounts, %d swipes",
-                 len(reels), new_accounts, result.get("scrolls_done", 0))
-    reel_posts = [{"url": r["url"], "username": r.get("username", "")} for r in reels if r.get("url")]
-    await _inline_engagement(cdp, engine, db, reel_posts, stats, current_session_id=current_session_id)
+    logger.info(
+        "Reel browsing: %d reels, %d new accounts, %d swipes",
+        len(reels),
+        new_accounts,
+        result.get("scrolls_done", 0),
+    )
+    reel_posts = [
+        {"url": r["url"], "username": r.get("username", "")} for r in reels if r.get("url")
+    ]
+    await _inline_engagement(
+        cdp, engine, db, reel_posts, stats, current_session_id=current_session_id
+    )
 
 
 async def execute_explore_browsing(
-    cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
-    *, rate_limiter: Any = None, current_session_id: str | None = None,
+    cdp,
+    graphql,
+    engine,
+    db: AsyncDatabaseStore,
+    plan: SessionPlan,
+    stats: dict,
+    *,
+    rate_limiter: Any = None,
+    current_session_id: str | None = None,
     config: Any = None,
 ) -> None:
     max_scrolls = plan.params.get("max_scrolls", 10)
@@ -134,11 +178,14 @@ async def execute_explore_browsing(
             continue
         try:
             ct = "reel" if "/reel/" in url else "post" if "/p/" in url else "unknown"
-            await db.upsert_content_item({
-                "url": url, "content_type": ct,
-                "owner_username": post.get("username", ""),
-                "engagement_status": "pending",
-            })
+            await db.upsert_content_item(
+                {
+                    "url": url,
+                    "content_type": ct,
+                    "owner_username": post.get("username", ""),
+                    "engagement_status": "pending",
+                }
+            )
         except Exception as e:
             logger.debug("Failed to save explore post %s: %s", url, e)
     new_accounts = 0
@@ -149,24 +196,39 @@ async def execute_explore_browsing(
                 account_id = await db.upsert_account({"username": username})
                 new_accounts += 1
                 await db.add_discovery_event(
-                    account_id=account_id, strategy="explore_browsing",
-                    source_username=None, query_text="explore_scroll",
+                    account_id=account_id,
+                    strategy="explore_browsing",
+                    source_username=None,
+                    query_text="explore_scroll",
                 )
         except Exception:
             logger.debug("Failed to upsert explore account %s", username)
     stats["accounts_discovered"] = new_accounts
     stats["posts_harvested"] = len(posts)
-    logger.info("Explore browsing: %d posts, %d usernames (%d new), %d scrolls",
-                 len(posts), len(usernames), new_accounts, result.get("scrolls_done", 0))
+    logger.info(
+        "Explore browsing: %d posts, %d usernames (%d new), %d scrolls",
+        len(posts),
+        len(usernames),
+        new_accounts,
+        result.get("scrolls_done", 0),
+    )
     await _inline_engagement(cdp, engine, db, posts, stats, current_session_id=current_session_id)
 
 
 async def execute_discovery(
-    cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
-    *, rate_limiter: Any = None, current_session_id: str | None = None,
+    cdp,
+    graphql,
+    engine,
+    db: AsyncDatabaseStore,
+    plan: SessionPlan,
+    stats: dict,
+    *,
+    rate_limiter: Any = None,
+    current_session_id: str | None = None,
     config: Any = None,
 ) -> None:
     from igautomation.scraper.collector import AccountCollector
+
     collector = AccountCollector(cdp, graphql, engine)
     target = plan.params.get("target_count", 100)
     strategies = plan.params.get("strategies", ["feed_browse", "discover_people"])
@@ -180,7 +242,8 @@ async def execute_discovery(
             is_new = existing is None
             account_id = await db.upsert_account({"username": username})
             await db.add_discovery_event(
-                account_id=account_id, strategy=plan.strategy,
+                account_id=account_id,
+                strategy=plan.strategy,
                 source_username=seeds[0] if seeds else None,
                 query_text=query_info,
             )
@@ -190,17 +253,27 @@ async def execute_discovery(
             logger.debug("Failed to save %s: %s", username, e)
     stats["accounts_discovered"] = discovered_count
     stats["actions_taken"] = (
-        engine._session.likes_used + engine._session.follows_used +
-        engine._session.profile_views_used + engine._session.searches_used
+        engine._session.likes_used
+        + engine._session.follows_used
+        + engine._session.profile_views_used
+        + engine._session.searches_used
     )
 
 
 async def execute_profiling(
-    cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
-    *, rate_limiter: Any = None, current_session_id: str | None = None,
+    cdp,
+    graphql,
+    engine,
+    db: AsyncDatabaseStore,
+    plan: SessionPlan,
+    stats: dict,
+    *,
+    rate_limiter: Any = None,
+    current_session_id: str | None = None,
     config: Any = None,
 ) -> None:
     from igautomation.scraper.analyzer import ProfileAnalyzer
+
     batch_size = plan.params.get("batch_size", 20)
     unanalyzed = await db.get_unanalyzed_accounts(limit=batch_size)
     if not unanalyzed:
@@ -212,7 +285,7 @@ async def execute_profiling(
     chunk_size = 10
     all_profiles = []
     for i in range(0, len(usernames), chunk_size):
-        chunk = usernames[i:i + chunk_size]
+        chunk = usernames[i : i + chunk_size]
         try:
             chunk_profiles = await asyncio.wait_for(
                 run_blocking(analyzer.analyze, chunk),
@@ -228,13 +301,20 @@ async def execute_profiling(
         # Async commit after each chunk so partial data is saved
         for profile in chunk_profiles:
             try:
-                await db.upsert_account({
-                    "username": profile.username, "full_name": profile.full_name,
-                    "bio": profile.bio, "follower_count": profile.follower_count,
-                    "following_count": profile.following_count, "post_count": profile.post_count,
-                    "is_private": int(profile.is_private), "is_verified": int(profile.is_verified),
-                    "tier": profile.tier, "category": profile.category,
-                })
+                await db.upsert_account(
+                    {
+                        "username": profile.username,
+                        "full_name": profile.full_name,
+                        "bio": profile.bio,
+                        "follower_count": profile.follower_count,
+                        "following_count": profile.following_count,
+                        "post_count": profile.post_count,
+                        "is_private": int(profile.is_private),
+                        "is_verified": int(profile.is_verified),
+                        "tier": profile.tier,
+                        "category": profile.category,
+                    }
+                )
             except Exception as e:
                 logger.debug("Failed to save profile %s: %s", profile.username, e)
         # Mark dead accounts in this chunk
@@ -242,11 +322,13 @@ async def execute_profiling(
         for username in chunk:
             if username not in chunk_usernames:
                 try:
-                    await db.upsert_account({
-                        "username": username,
-                        "follower_count": 0,
-                        "tier": "dead",
-                    })
+                    await db.upsert_account(
+                        {
+                            "username": username,
+                            "follower_count": 0,
+                            "tier": "dead",
+                        }
+                    )
                 except Exception:
                     logger.debug("Failed to mark dead account %s", username)
     profiles = all_profiles
@@ -263,8 +345,15 @@ async def execute_profiling(
 
 
 async def execute_monitoring(
-    cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
-    *, rate_limiter: Any = None, current_session_id: str | None = None,
+    cdp,
+    graphql,
+    engine,
+    db: AsyncDatabaseStore,
+    plan: SessionPlan,
+    stats: dict,
+    *,
+    rate_limiter: Any = None,
+    current_session_id: str | None = None,
     config: Any = None,
 ) -> None:
     max_accounts = plan.params.get("max_accounts", 30)
@@ -298,13 +387,19 @@ async def execute_monitoring(
         new_followers = (profile_data.get("edge_followed_by", {}) or {}).get("count", 0)
         new_following = (profile_data.get("edge_follow", {}) or {}).get("count", 0)
         new_posts = (profile_data.get("edge_owner_to_timeline_media", {}) or {}).get("count", 0)
-        await db.upsert_account({
-            "username": username, "follower_count": new_followers,
-            "following_count": new_following, "post_count": new_posts,
-        })
+        await db.upsert_account(
+            {
+                "username": username,
+                "follower_count": new_followers,
+                "following_count": new_following,
+                "post_count": new_posts,
+            }
+        )
         await db.add_follower_snapshot(
-            account_id=account_id, follower_count=new_followers,
-            following_count=new_following, post_count=new_posts,
+            account_id=account_id,
+            follower_count=new_followers,
+            following_count=new_following,
+            post_count=new_posts,
         )
         engine._delay()
         engine._session.profile_views_used += 1
@@ -319,8 +414,15 @@ async def execute_monitoring(
 
 
 async def execute_engagement(
-    cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
-    *, rate_limiter: Any = None, current_session_id: str | None = None,
+    cdp,
+    graphql,
+    engine,
+    db: AsyncDatabaseStore,
+    plan: SessionPlan,
+    stats: dict,
+    *,
+    rate_limiter: Any = None,
+    current_session_id: str | None = None,
     config: Any = None,
 ) -> None:
     max_follows = plan.params.get("max_follows", 2)
@@ -362,17 +464,29 @@ async def execute_engagement(
 def _content_type_from_db(value: str) -> str:
     v = value.lower().strip() if value else ""
     mapping = {
-        "reel": "reel", "reels": "reel", "clip": "reel",
-        "carousel": "carousel", "album": "carousel",
-        "post": "post", "photo": "post", "image": "post",
+        "reel": "reel",
+        "reels": "reel",
+        "clip": "reel",
+        "carousel": "carousel",
+        "album": "carousel",
+        "post": "post",
+        "photo": "post",
+        "image": "post",
         "video": "video",
     }
     return mapping.get(v, "unknown")
 
 
 async def execute_content_engagement(
-    cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
-    *, rate_limiter: Any = None, current_session_id: str | None = None,
+    cdp,
+    graphql,
+    engine,
+    db: AsyncDatabaseStore,
+    plan: SessionPlan,
+    stats: dict,
+    *,
+    rate_limiter: Any = None,
+    current_session_id: str | None = None,
     config: Any = None,
 ) -> None:
     from igautomation.content.engager import ContentEngager
@@ -420,21 +534,32 @@ async def execute_content_engagement(
             try:
                 analyzed_item = analyze_content_browse(cdp, item, dwell=3.0)
                 if analyzed_item and analyzed_item.llm_analysis:
-                    await db.upsert_content_item({
-                        "url": url, "llm_analysis": analyzed_item.llm_analysis,
-                        "category": analyzed_item.category,
-                        "llm_collection_suggestion": analyzed_item.llm_collection_suggestion,
-                        "is_bd_relevant": analyzed_item.is_bd_relevant,
-                        "content_niche": analyzed_item.content_niche,
-                    })
+                    await db.upsert_content_item(
+                        {
+                            "url": url,
+                            "llm_analysis": analyzed_item.llm_analysis,
+                            "category": analyzed_item.category,
+                            "llm_collection_suggestion": analyzed_item.llm_collection_suggestion,
+                            "is_bd_relevant": analyzed_item.is_bd_relevant,
+                            "content_niche": analyzed_item.content_niche,
+                        }
+                    )
                     stats["actions_taken"] += 1
-                    logger.info("Analyzed content %s -- category=%s", shortcode, analyzed_item.category or "?")
-                collection_name = (analyzed_item.llm_collection_suggestion or "").strip() if analyzed_item else ""
+                    logger.info(
+                        "Analyzed content %s -- category=%s",
+                        shortcode,
+                        analyzed_item.category or "?",
+                    )
+                collection_name = (
+                    (analyzed_item.llm_collection_suggestion or "").strip() if analyzed_item else ""
+                )
                 if collection_name:
                     try:
                         collection_id = await db.upsert_collection(name=collection_name)
                         await db.add_content_to_collection(item_id, collection_id)
-                        logger.info("Linked content %s -> collection '%s'", shortcode, collection_name)
+                        logger.info(
+                            "Linked content %s -> collection '%s'", shortcode, collection_name
+                        )
                     except Exception as ce:
                         logger.debug("Collection link failed for %s: %s", shortcode, ce)
             except Exception as e:
@@ -450,8 +575,15 @@ async def execute_content_engagement(
 
 
 async def execute_story_viewing(
-    cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
-    *, rate_limiter: Any = None, current_session_id: str | None = None,
+    cdp,
+    graphql,
+    engine,
+    db: AsyncDatabaseStore,
+    plan: SessionPlan,
+    stats: dict,
+    *,
+    rate_limiter: Any = None,
+    current_session_id: str | None = None,
     config: Any = None,
 ) -> None:
     stats["skipped_reason"] = "not_implemented"
@@ -459,8 +591,15 @@ async def execute_story_viewing(
 
 
 async def execute_auto_unfollow(
-    cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
-    *, rate_limiter: Any = None, current_session_id: str | None = None,
+    cdp,
+    graphql,
+    engine,
+    db: AsyncDatabaseStore,
+    plan: SessionPlan,
+    stats: dict,
+    *,
+    rate_limiter: Any = None,
+    current_session_id: str | None = None,
     config: Any = None,
 ) -> None:
     stats["skipped_reason"] = "not_implemented"
@@ -468,11 +607,22 @@ async def execute_auto_unfollow(
 
 
 async def execute_comment_engagement(
-    cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
-    *, rate_limiter: Any = None, current_session_id: str | None = None,
+    cdp,
+    graphql,
+    engine,
+    db: AsyncDatabaseStore,
+    plan: SessionPlan,
+    stats: dict,
+    *,
+    rate_limiter: Any = None,
+    current_session_id: str | None = None,
     config: Any = None,
 ) -> None:
-    comment_enabled = (config or {}).get("comment_enabled", False) if isinstance(config, dict) else getattr(config, "comment_enabled", False)
+    comment_enabled = (
+        (config or {}).get("comment_enabled", False)
+        if isinstance(config, dict)
+        else getattr(config, "comment_enabled", False)
+    )
     if comment_enabled:
         logger.info("Comment engagement implementation pending")
     else:
@@ -481,8 +631,15 @@ async def execute_comment_engagement(
 
 
 async def execute_own_account_monitoring(
-    cdp, graphql, engine, db: AsyncDatabaseStore, plan: SessionPlan, stats: dict,
-    *, rate_limiter: Any = None, current_session_id: str | None = None,
+    cdp,
+    graphql,
+    engine,
+    db: AsyncDatabaseStore,
+    plan: SessionPlan,
+    stats: dict,
+    *,
+    rate_limiter: Any = None,
+    current_session_id: str | None = None,
     config: Any = None,
 ) -> None:
     accounts = await db.get_available_ig_accounts()
@@ -510,8 +667,13 @@ async def execute_own_account_monitoring(
 
 
 async def _inline_engagement(
-    cdp, engine, db: AsyncDatabaseStore, posts: list[dict], stats: dict,
-    *, current_session_id: str | None = None,
+    cdp,
+    engine,
+    db: AsyncDatabaseStore,
+    posts: list[dict],
+    stats: dict,
+    *,
+    current_session_id: str | None = None,
 ) -> None:
     max_inline_likes = 5
     max_inline_follows = 2
@@ -537,13 +699,20 @@ async def _inline_engagement(
                         if username:
                             account = await db.get_account_by_username(username)
                             if account:
-                                await db.log_interaction(account["id"], "like", url, current_session_id)
+                                await db.log_interaction(
+                                    account["id"], "like", url, current_session_id
+                                )
                         await db.update_content_engagement_status_by_url(url, "engaged")
                     except Exception:
                         logger.debug("Failed to log like interaction for %s", url)
             except Exception:
                 logger.debug("Failed to like post %s", url)
-        if follows_done < max_inline_follows and username and engine.can_follow() and random.random() < 0.1:
+        if (
+            follows_done < max_inline_follows
+            and username
+            and engine.can_follow()
+            and random.random() < 0.1
+        ):
             try:
                 followed = await run_blocking(engine.follow_user, username)
                 if followed:
@@ -553,7 +722,9 @@ async def _inline_engagement(
                     stats["follows_done"] += 1
                     account = await db.get_account_by_username(username)
                     if account:
-                        await db.log_interaction(account["id"], "follow", username, current_session_id)
+                        await db.log_interaction(
+                            account["id"], "follow", username, current_session_id
+                        )
             except Exception as e:
                 logger.debug("Failed to follow user %s inline: %s", username, e)
 
@@ -561,6 +732,7 @@ async def _inline_engagement(
 # ---------------------------------------------------------------------------
 # strategy registry
 # ---------------------------------------------------------------------------
+
 
 def build_strategy_registry() -> dict[str, Callable]:
     return {
@@ -577,10 +749,3 @@ def build_strategy_registry() -> dict[str, Callable]:
         "comment_engagement": execute_comment_engagement,
         "own_account_monitoring": execute_own_account_monitoring,
     }
-
-
-def strategy_registry_covers_fallback_plans() -> set[str]:
-    from igautomation.daemon.strategies import FALLBACK_PLANS
-    registry = build_strategy_registry()
-    missing = {p.strategy for p in FALLBACK_PLANS} - set(registry)
-    return missing

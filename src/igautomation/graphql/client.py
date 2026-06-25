@@ -228,13 +228,15 @@ class GraphQLClient:
             username = user.get("username", "")
             if not username:
                 continue
-            results.append({
-                "username": username,
-                "pk": str(user.get("pk", "")),
-                "full_name": user.get("full_name", ""),
-                "is_verified": user.get("is_verified", False),
-                "profile_pic_url": user.get("profile_pic_url", ""),
-            })
+            results.append(
+                {
+                    "username": username,
+                    "pk": str(user.get("pk", "")),
+                    "full_name": user.get("full_name", ""),
+                    "is_verified": user.get("is_verified", False),
+                    "profile_pic_url": user.get("profile_pic_url", ""),
+                }
+            )
         return results
 
     def get_user_id(self, username: str) -> str | None:
@@ -267,6 +269,7 @@ class GraphQLClient:
                 # Fallback: walk the response for any numeric id
                 data_str = json.dumps(data)
                 import re
+
                 m = re.search(r'"id"\s*:\s*"?(\d{5,})"', data_str)
                 if m:
                     logger.debug("Resolved @%s → %s via fallback scan", username, m.group(1))
@@ -349,6 +352,7 @@ class GraphQLClient:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _extract_usernames(data: Any, depth: int = 0) -> list[str]:
     """Recursively extract ``username`` fields from a GraphQL response."""

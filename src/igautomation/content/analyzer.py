@@ -8,6 +8,7 @@ assess content: by looking at it.
 
 Uses an OpenAI-compatible endpoint (Gemini 2.5 Flash Lite) for analysis.
 """
+
 from __future__ import annotations
 
 import json
@@ -284,7 +285,12 @@ def analyze_content_browse(
 
     logger.info(
         "Browsed %s — user=%s, caption=%d chars, hashtags=%d, likes=%s, alt=%d",
-        item.url, username, len(caption), len(hashtags), likes, len(alt_texts),
+        item.url,
+        username,
+        len(caption),
+        len(hashtags),
+        likes,
+        len(alt_texts),
     )
 
     # Build the LLM prompt with ACTUAL content from the page
@@ -341,13 +347,15 @@ Respond with ONLY valid JSON, no other text."""
         import urllib.request
 
         api_url = f"{base_url.rstrip('/')}/chat/completions"
-        payload = json.dumps({
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-            "max_tokens": 500,
-            "stream": False,
-        }).encode()
+        payload = json.dumps(
+            {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 500,
+                "stream": False,
+            }
+        ).encode()
 
         req = urllib.request.Request(
             api_url,
@@ -384,7 +392,10 @@ Respond with ONLY valid JSON, no other text."""
 
         logger.info(
             "LLM analysis: %s → collection=%s, niche=%s, user=@%s",
-            item.url, item.llm_collection_suggestion, item.content_niche, username,
+            item.url,
+            item.llm_collection_suggestion,
+            item.content_niche,
+            username,
         )
 
     except Exception as exc:
@@ -430,13 +441,15 @@ Respond with ONLY valid JSON, no other text."""
         import urllib.request
 
         url = f"{base_url.rstrip('/')}/chat/completions"
-        payload = json.dumps({
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-            "max_tokens": 500,
-            "stream": False,
-        }).encode()
+        payload = json.dumps(
+            {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 500,
+                "stream": False,
+            }
+        ).encode()
 
         req = urllib.request.Request(
             url,

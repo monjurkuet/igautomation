@@ -35,8 +35,10 @@ logger = logging.getLogger(__name__)
 # Models
 # -----------------------------------------------------------------------
 
+
 class AnalysisResult(BaseModel):
     """Structured output from an LLM analysis run."""
+
     analysis_type: str  # "quality" | "strategy" | "tier"
     summary: str = ""
     findings: list[str] = Field(default_factory=list)
@@ -143,6 +145,7 @@ Respond ONLY in this JSON format:
 # AnalysisEngine
 # -----------------------------------------------------------------------
 
+
 class AnalysisEngine:
     """Run LLM-powered analyses on collected IG data.
 
@@ -166,6 +169,7 @@ class AnalysisEngine:
         self.llm_base_url = llm_base_url or llm_cfg.base_url
         self.llm_api_key = llm_api_key or llm_cfg.api_key
         self.llm_model = llm_model or llm_cfg.model
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -244,9 +248,7 @@ class AnalysisEngine:
         stats["stale_accounts"] = row[0] if row else 0
 
         # Unanalyzed
-        cur = await db.db.execute(
-            "SELECT COUNT(*) FROM accounts WHERE bio IS NULL OR bio = ''"
-        )
+        cur = await db.db.execute("SELECT COUNT(*) FROM accounts WHERE bio IS NULL OR bio = ''")
         row = await cur.fetchone()
         stats["unanalyzed_count"] = row[0] if row else 0
 
@@ -280,7 +282,9 @@ class AnalysisEngine:
             )
             rows = await cur.fetchall()
             stats["recent_results"] = (
-                ", ".join(f"{r['strategy']}:{r['cnt']}sessions/{r['total_disc']}accounts" for r in rows)
+                ", ".join(
+                    f"{r['strategy']}:{r['cnt']}sessions/{r['total_disc']}accounts" for r in rows
+                )
                 or "none"
             )
 
@@ -301,9 +305,7 @@ class AnalysisEngine:
                 GROUP BY tier"""
             )
             rows = await cur.fetchall()
-            stats["recent_tiers"] = (
-                ", ".join(f"{r['tier']}={r['cnt']}" for r in rows) or "none"
-            )
+            stats["recent_tiers"] = ", ".join(f"{r['tier']}={r['cnt']}" for r in rows) or "none"
 
         return stats
 
@@ -312,22 +314,24 @@ class AnalysisEngine:
         import urllib.request
 
         url = f"{self.llm_base_url.rstrip('/')}/chat/completions"
-        payload = json.dumps({
-            "model": self.llm_model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an IG intelligence analyst. "
-                        "Respond only in valid JSON matching the requested schema."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            "max_tokens": 1000,
-            "temperature": 0.7,
-            "stream": False,
-        }).encode()
+        payload = json.dumps(
+            {
+                "model": self.llm_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an IG intelligence analyst. "
+                            "Respond only in valid JSON matching the requested schema."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": 1000,
+                "temperature": 0.7,
+                "stream": False,
+            }
+        ).encode()
 
         headers = {
             "Content-Type": "application/json",

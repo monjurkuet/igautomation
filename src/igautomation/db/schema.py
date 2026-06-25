@@ -316,12 +316,4 @@ CREATE INDEX IF NOT EXISTS idx_ig_accounts_status ON ig_accounts(status);
 ALTER TABLE sessions ADD COLUMN ig_account_id INTEGER REFERENCES ig_accounts(id);
 """,
     ),
-    (
-        "005_ig_account_extras",
-        """
--- cooldown_until, preferred_strategies, warmup_complete already in 004
--- This migration kept for historical compatibility, no-op for fresh DBs
-SELECT 1;
-""",
-    ),
 ]

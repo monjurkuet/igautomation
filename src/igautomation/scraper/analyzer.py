@@ -31,27 +31,76 @@ logger = logging.getLogger(__name__)
 
 # Keywords that suggest a Bangladeshi model/influencer profile.
 BD_KEYWORDS: list[str] = [
-    "bangladesh", "bangladeshi", "bd", "deshi", "dhaka", "chittagong",
-    "ctg", "sylhet", "rajshahi", "khulna", "comilla", "gazipur",
-    "narayanganj", "বাংলা", "ঢাকা", "🇧🇩", "bengali",
-    "cox's bazar", "rangpur", "mymensingh", "barishal", "bogra",
-    "tongi", "savlon", "narsingdi", "brahmanbaria",
+    "bangladesh",
+    "bangladeshi",
+    "bd",
+    "deshi",
+    "dhaka",
+    "chittagong",
+    "ctg",
+    "sylhet",
+    "rajshahi",
+    "khulna",
+    "comilla",
+    "gazipur",
+    "narayanganj",
+    "বাংলা",
+    "ঢাকা",
+    "🇧🇩",
+    "bengali",
+    "cox's bazar",
+    "rangpur",
+    "mymensingh",
+    "barishal",
+    "bogra",
+    "tongi",
+    "savlon",
+    "narsingdi",
+    "brahmanbaria",
 ]
 
 MODEL_KEYWORDS: list[str] = [
-    "model", "influencer", "creator", "fashion", "beauty",
-    "actress", "digital creator", "artist", "content creator",
-    "blogger", "stylist", "makeup", "glamour", "bold",
-    "lifestyle", "tiktok", "reel creator", "vlogger",
-    "entrepreneur", "public figure", "student influencer",
+    "model",
+    "influencer",
+    "creator",
+    "fashion",
+    "beauty",
+    "actress",
+    "digital creator",
+    "artist",
+    "content creator",
+    "blogger",
+    "stylist",
+    "makeup",
+    "glamour",
+    "bold",
+    "lifestyle",
+    "tiktok",
+    "reel creator",
+    "vlogger",
+    "entrepreneur",
+    "public figure",
+    "student influencer",
 ]
 
 # Niche keywords for small/growing accounts that signal potential
 RISING_SIGNAL_KEYWORDS: list[str] = [
-    "just started", "new account", "beginner", "growing",
-    "college", "university", "student", "campus",
-    "upcoming", "aspiring", "fresh face", "new face",
-    "local", "small town", "district", "village",
+    "just started",
+    "new account",
+    "beginner",
+    "growing",
+    "college",
+    "university",
+    "student",
+    "campus",
+    "upcoming",
+    "aspiring",
+    "fresh face",
+    "new face",
+    "local",
+    "small town",
+    "district",
+    "village",
 ]
 
 
@@ -259,7 +308,8 @@ class ProfileAnalyzer:
             if self._graphql.rate_limited:
                 logger.warning(
                     "analyze: rate-limited by Instagram (429), stopping at %d/%d",
-                    i, len(usernames),
+                    i,
+                    len(usernames),
                 )
                 break
 
@@ -309,11 +359,17 @@ class ProfileAnalyzer:
 
         # Numeric counts directly from API — no string parsing needed
         edge_followed_by = user.get("edge_followed_by", {})
-        info.follower_count = edge_followed_by.get("count", 0) if isinstance(edge_followed_by, dict) else 0
+        info.follower_count = (
+            edge_followed_by.get("count", 0) if isinstance(edge_followed_by, dict) else 0
+        )
         edge_follow = user.get("edge_follow", {})
         info.following_count = edge_follow.get("count", 0) if isinstance(edge_follow, dict) else 0
         edge_owner_to_timeline = user.get("edge_owner_to_timeline_media", {})
-        info.post_count = edge_owner_to_timeline.get("count", 0) if isinstance(edge_owner_to_timeline, dict) else 0
+        info.post_count = (
+            edge_owner_to_timeline.get("count", 0)
+            if isinstance(edge_owner_to_timeline, dict)
+            else 0
+        )
 
         # Build meta_description for compatibility
         info.meta_description = (

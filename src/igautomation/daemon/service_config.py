@@ -30,4 +30,5 @@ def service_file_name() -> str:
 
 def user_systemd_dir() -> str:
     import os
+
     return os.path.expanduser("~/.config/systemd/user")

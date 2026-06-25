@@ -1,4 +1,5 @@
 """Accounts CLI subcommands for igx."""
+
 from __future__ import annotations
 
 import logging
@@ -47,7 +48,9 @@ def accounts_list(
         try:
             accounts = await db.get_all_ig_accounts()
             if not accounts:
-                console.print("[yellow]No IG accounts tracked yet. Use 'igx accounts add <port>'[/yellow]")
+                console.print(
+                    "[yellow]No IG accounts tracked yet. Use 'igx accounts add <port>'[/yellow]"
+                )
                 return
 
             table = Table(title="IG Accounts")
@@ -158,7 +161,9 @@ def accounts_refresh(
                 port_list = [a["port"] for a in existing]
 
             if not port_list:
-                console.print("[yellow]No ports to probe. Add accounts first with 'igx accounts add'[/yellow]")
+                console.print(
+                    "[yellow]No ports to probe. Add accounts first with 'igx accounts add'[/yellow]"
+                )
                 return
 
             console.print(f"[bold]Probing {len(port_list)} port(s)...[/bold]")
@@ -168,8 +173,7 @@ def accounts_refresh(
                 if result.error:
                     console.print(f"  Port {p}: [red]{result.error}[/red]")
                     await db.update_ig_account_status(
-                        (await db.get_ig_account_by_port(p) or {}).get("id", 0),
-                        "error"
+                        (await db.get_ig_account_by_port(p) or {}).get("id", 0), "error"
                     )
                 else:
                     data: dict = {

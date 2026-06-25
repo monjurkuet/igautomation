@@ -231,12 +231,32 @@ def _is_individual_account(username: str) -> bool:
     """Return True if the username looks like an individual, not a page/hub."""
     lower = username.lower()
     non_individual_keywords = [
-        "shoutout", "hub", "beauties", "girls_", "fashion",
-        "model_world", "_model_", "hot_girls", "gram",
-        "spotlight", "queens", "baddies", "reel", "tiktok",
-        "glamour", "creator", "influencer", "beauty", "style",
-        "world", "official", "_bd", "bangladeshi_",
-        "gallery", "star", "official_",
+        "shoutout",
+        "hub",
+        "beauties",
+        "girls_",
+        "fashion",
+        "model_world",
+        "_model_",
+        "hot_girls",
+        "gram",
+        "spotlight",
+        "queens",
+        "baddies",
+        "reel",
+        "tiktok",
+        "glamour",
+        "creator",
+        "influencer",
+        "beauty",
+        "style",
+        "world",
+        "official",
+        "_bd",
+        "bangladeshi_",
+        "gallery",
+        "star",
+        "official_",
     ]
     return not any(kw in lower for kw in non_individual_keywords)
 
@@ -348,7 +368,7 @@ class AccountCollector:
                 try:
                     profiles = _json_loads(raw)
                     new = self._add_many(profiles)
-                    self._emit(f"  Tab {tab.get('url','')}: +{new} ({len(self._accounts)} total)")
+                    self._emit(f"  Tab {tab.get('url', '')}: +{new} ({len(self._accounts)} total)")
                 except Exception:
                     pass
         return len(self._accounts)
@@ -403,7 +423,7 @@ class AccountCollector:
 
             new = self._add_many(found)
             if new > 0:
-                self._emit(f"  [{i+1}] @{page}: +{new} ({len(self._accounts)} total)")
+                self._emit(f"  [{i + 1}] @{page}: +{new} ({len(self._accounts)} total)")
 
             self._organic_delay()
 
@@ -583,17 +603,16 @@ class AccountCollector:
 
             # Find individual accounts we haven't processed yet
             candidates = sorted(
-                u for u in self._accounts
-                if u not in processed and _is_individual_account(u)
+                u for u in self._accounts if u not in processed and _is_individual_account(u)
             )
             candidates = candidates[:max_profiles]
 
             if not candidates:
-                self._emit(f"Cascade round {depth+1}: no new candidates")
+                self._emit(f"Cascade round {depth + 1}: no new candidates")
                 break
 
             self._emit(
-                f"Cascade round {depth+1}/{max_depth}: "
+                f"Cascade round {depth + 1}/{max_depth}: "
                 f"fetching suggestions for {len(candidates)} profiles"
             )
 
@@ -624,7 +643,7 @@ class AccountCollector:
 
             round_new = len(self._accounts) - before
             total_new += round_new
-            self._emit(f"Cascade round {depth+1} done: +{round_new} accounts")
+            self._emit(f"Cascade round {depth + 1} done: +{round_new} accounts")
 
             if round_new == 0:
                 break

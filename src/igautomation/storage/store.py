@@ -51,14 +51,6 @@ class JSONStore:
         logger.info("Saved %d accounts to %s", len(accounts), path)
         return path
 
-    def load(self, filename: str = "accounts.json") -> list[dict[str, Any]]:
-        """Load accounts from a JSON file."""
-        path = self.output_dir / filename
-        if not path.exists():
-            return []
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data.get("accounts", [])
-
 
 class CSVStore:
     """Export account data as CSV."""
@@ -189,22 +181,6 @@ class SQLiteStore:
                     pass
             conn.commit()
         return inserted
-
-    def get_all_accounts(self) -> list[dict[str, Any]]:
-        """Return all accounts from the database."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT * FROM accounts ORDER BY username").fetchall()
-            return [dict(r) for r in rows]
-
-    def get_bd_models(self) -> list[dict[str, Any]]:
-        """Return accounts matching BD or model criteria."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM accounts WHERE is_bd = 1 OR is_model = 1 ORDER BY username"
-            ).fetchall()
-            return [dict(r) for r in rows]
 
     def count(self) -> int:
         """Return total number of accounts."""

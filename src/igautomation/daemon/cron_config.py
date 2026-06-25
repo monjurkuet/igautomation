@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 
 from croniter import croniter
 from pydantic import BaseModel
-
-logger = logging.getLogger(__name__)
 
 
 class CronJob(BaseModel):
@@ -48,14 +45,6 @@ def default_cron_jobs(db_path: str = "igautomation.db") -> list[CronJob]:
     ]
 
 
-def validate_schedule(schedule: str) -> bool:
-    try:
-        croniter(schedule)
-        return True
-    except (ValueError, KeyError):
-        return False
-
-
 def next_run(schedule: str, now: datetime | None = None) -> datetime | None:
     try:
         c = croniter(schedule, now or datetime.now(timezone.utc))
@@ -70,12 +59,14 @@ def next_runs(jobs: list[CronJob], now: datetime | None = None) -> list[dict]:
         if not job.enabled:
             continue
         nxt = next_run(job.schedule, now)
-        results.append({
-            "name": job.name,
-            "schedule": job.schedule,
-            "next_run": nxt.isoformat() if nxt else "invalid_schedule",
-            "description": job.description,
-        })
+        results.append(
+            {
+                "name": job.name,
+                "schedule": job.schedule,
+                "next_run": nxt.isoformat() if nxt else "invalid_schedule",
+                "description": job.description,
+            }
+        )
     return results
 
 

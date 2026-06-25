@@ -9,7 +9,6 @@ from __future__ import annotations
 import random
 import time
 from dataclasses import dataclass
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -153,7 +152,7 @@ class BehaviorConfig(BaseModel):
     read_dwell_min: float = 3.0
     read_dwell_max: float = 12.0
 
-    model_config: dict[str, Any] = {"frozen": False}
+    model_config = {"frozen": False}
 
     # -- factory & random helpers --------------------------------------------
 

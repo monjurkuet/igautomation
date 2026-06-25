@@ -23,8 +23,6 @@ Usage::
     daemon.run_one()       # run a single session and exit
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -136,8 +134,9 @@ class DaemonLoop:
 
     async def _run_forever_async(self) -> None:
         """Main async loop."""
-        logger.info("Daemon starting — config: db=%s, llm=%s",
-                     self.config.db_path, self.config.llm_enabled)
+        logger.info(
+            "Daemon starting — config: db=%s, llm=%s", self.config.db_path, self.config.llm_enabled
+        )
 
         loop = asyncio.get_running_loop()
         shutdown_event = asyncio.Event()
@@ -174,8 +173,7 @@ class DaemonLoop:
                 self._sessions_date = now_date
 
             if self._sessions_today >= self.config.max_sessions_per_day:
-                logger.info("Daily session limit reached (%d), sleeping 1h",
-                            self._sessions_today)
+                logger.info("Daily session limit reached (%d), sleeping 1h", self._sessions_today)
                 await _interruptible_sleep(3600)
                 if not self._running:
                     break
@@ -306,8 +304,17 @@ class DaemonLoop:
                             (ig_account_id, session_uuid),
                         )
                         await db.db.commit()
-                        logger.debug("Session %s using ig_account %d (port %d)",
-                                     session_uuid[:8], ig_account_id, cdp_port)
+                        logger.debug(
+                            "Session %s using ig_account %d (port %d)",
+                            session_uuid[:8],
+                            ig_account_id,
+                            cdp_port,
+                        )
+                        # Track IG account usage for daily_session_count
+                        try:
+                            await db.touch_ig_account(ig_account_id)
+                        except Exception as e:
+                            logger.debug("touch_ig_account failed: %s", e)
                 except Exception as e:
                     logger.debug("Could not resolve ig_account for port %d: %s", cdp_port, e)
 
@@ -315,22 +322,29 @@ class DaemonLoop:
                     graphql = GraphQLClient(cdp)
                     engine = BehaviorEngine(cdp, behavior_config, session_config)
 
-                    executor = _STRATEGY_REGISTRY.get(plan.strategy)
-                    if executor is not None:
-                        await executor(
-                            cdp, graphql, engine, db, plan, stats,
-                            rate_limiter=self._rate_limiter,
-                            current_session_id=self._current_session_id,
-                            config=self.config,
+                    timeout = self.config.session_timeout_seconds
+                    executor_fn = _STRATEGY_REGISTRY.get(plan.strategy, execute_feed_browsing)
+                    try:
+                        await asyncio.wait_for(
+                            executor_fn(
+                                cdp,
+                                graphql,
+                                engine,
+                                db,
+                                plan,
+                                stats,
+                                rate_limiter=self._rate_limiter,
+                                current_session_id=self._current_session_id,
+                                config=self.config,
+                            ),
+                            timeout=timeout,
                         )
-                    else:
-                        logger.warning("Unknown strategy: %s, falling back to feed_browsing", plan.strategy)
-                        await execute_feed_browsing(
-                            cdp, graphql, engine, db, plan, stats,
-                            rate_limiter=self._rate_limiter,
-                            current_session_id=self._current_session_id,
-                            config=self.config,
+                    except asyncio.TimeoutError:
+                        logger.error(
+                            "Session %s timed out after %ds — aborting", session_uuid[:8], timeout
                         )
+                        stats["status"] = "error"
+                        stats["error"] = f"session_timeout_{timeout}s"
                 finally:
                     cdp.close()
 
@@ -359,9 +373,12 @@ class DaemonLoop:
 
         logger.info(
             "=== Session %s done: %s | discovered=%d profiled=%d actions=%d duration=%.0fs ===",
-            session_uuid[:8], stats["status"],
-            stats["accounts_discovered"], stats["accounts_profiled"],
-            stats["actions_taken"], stats["duration_seconds"],
+            session_uuid[:8],
+            stats["status"],
+            stats["accounts_discovered"],
+            stats["accounts_profiled"],
+            stats["actions_taken"],
+            stats["duration_seconds"],
         )
 
         return stats
@@ -371,20 +388,47 @@ class DaemonLoop:
     # ------------------------------------------------------------------
 
     async def _get_llm_plan(self, db: AsyncDatabaseStore) -> SessionPlan:
-        """Ask the LLM to pick the next session strategy."""
+        """Ask the LLM to pick the next session strategy. Retries once on bad JSON."""
         try:
             if not self.config.llm_api_key:
                 return self._get_fallback_plan()
             stats = await self._gather_stats(db)
             prompt = self.config.llm_planning_prompt.format(**stats)
-            response = await self._call_llm(prompt)
-            if response:
+            for attempt in range(2):
+                response = await self._call_llm(prompt)
+                if not response:
+                    if attempt == 0:
+                        logger.warning("LLM returned empty — retrying once")
+                        continue
+                    break
                 cleaned = response.strip()
+                # Strip markdown code fences if present
                 if cleaned.startswith("```"):
                     lines = cleaned.split("\n")
                     lines = [line for line in lines if not line.strip().startswith("```")]
-                    cleaned = "\n".join(lines)
-                data = json.loads(cleaned)
+                    cleaned = "\n".join(lines).strip()
+                # Try JSON parse directly
+                data = None
+                try:
+                    data = json.loads(cleaned)
+                except json.JSONDecodeError:
+                    # Fallback: find first complete JSON object via raw_decode
+                    for start_idx in range(len(cleaned)):
+                        if cleaned[start_idx] == "{":
+                            try:
+                                decoder = json.JSONDecoder()
+                                obj, _ = decoder.raw_decode(cleaned, start_idx)
+                                data = obj
+                                logger.info("LLM response extracted via raw_decode fallback")
+                                break
+                            except (json.JSONDecodeError, ValueError):
+                                continue
+                    if data is None:
+                        if attempt == 0:
+                            logger.warning("LLM bad JSON — retrying once")
+                            continue
+                        logger.warning("LLM bad JSON after retry — using fallback")
+                        break
                 strategy = data.get("strategy", "discovery")
                 if strategy not in _STRATEGY_REGISTRY:
                     logger.warning("LLM returned unknown strategy: %s — using fallback", strategy)
@@ -428,9 +472,7 @@ class DaemonLoop:
             rows = await cur.fetchall()
             content_str = ", ".join(f"{r['engagement_status']}={r['cnt']}" for r in rows) or "none"
 
-            cur = await db.db.execute(
-                "SELECT COUNT(*) FROM accounts WHERE bio IS NULL OR bio = ''"
-            )
+            cur = await db.db.execute("SELECT COUNT(*) FROM accounts WHERE bio IS NULL OR bio = ''")
             row = await cur.fetchone()
             unanalyzed_count = row[0] if row else 0
 
@@ -457,7 +499,9 @@ class DaemonLoop:
                 "story_candidates": story_candidates,
                 "unfollow_candidates": unfollow_candidates,
                 "last_strategy": self._last_strategies[-1] if self._last_strategies else "none",
-                "last_2_strategies": ", ".join(self._last_strategies[-2:]) if len(self._last_strategies) >= 2 else "none",
+                "last_2_strategies": ", ".join(self._last_strategies[-2:])
+                if len(self._last_strategies) >= 2
+                else "none",
             }
         except Exception as e:
             logger.warning("Failed to gather stats: %s", e)
@@ -481,16 +525,21 @@ class DaemonLoop:
 
         base = self.config.llm_base_url.rstrip("/")
         url = f"{base}/chat/completions"
-        payload = json.dumps({
-            "model": self.config.llm_model,
-            "messages": [
-                {"role": "system", "content": "You are an IG intelligence analyst. Respond only in valid JSON."},
-                {"role": "user", "content": prompt},
-            ],
-            "max_tokens": 500,
-            "temperature": 0.7,
-            "stream": False,
-        }).encode()
+        payload = json.dumps(
+            {
+                "model": self.config.llm_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are an IG intelligence analyst. Respond only in valid JSON.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": 500,
+                "temperature": 0.7,
+                "stream": False,
+            }
+        ).encode()
 
         headers = {
             "Content-Type": "application/json",
@@ -524,8 +573,11 @@ class DaemonLoop:
             result = await engine.run_quality_review()
             if result and result.summary:
                 await engine.save_result(result)
-                logger.info("Auto-analysis complete: %s (%d findings)",
-                             result.summary[:60], len(result.findings))
+                logger.info(
+                    "Auto-analysis complete: %s (%d findings)",
+                    result.summary[:60],
+                    len(result.findings),
+                )
         except Exception as e:
             logger.debug("Auto-analysis skipped: %s", e)
 
@@ -544,8 +596,7 @@ class DaemonLoop:
             prev_two = self._last_strategies[-3:]
             same_count = sum(1 for s in prev_two if s == last)
             if same_count >= 3:
-                logger.info("Diversity guard: last 3 sessions all %s — cycling",
-                            last)
+                logger.info("Diversity guard: last 3 sessions all %s — cycling", last)
                 attempts = 0
                 while attempts < len(FALLBACK_PLANS):
                     self._plan_index += 1
@@ -593,12 +644,14 @@ class DaemonLoop:
         Returns the IG tab dict on success, None on failure.
         """
         import urllib.request as _urllib_request
+
         try:
             resp = _urllib_request.urlopen(f"{base}/json/list", timeout=5)
             all_tabs = json.loads(resp.read())
             # Pick a real http tab (not extensions, blobs, devtools)
             real_tabs = [
-                t for t in all_tabs
+                t
+                for t in all_tabs
                 if t.get("url", "").startswith("http")
                 and "chrome-extension" not in t.get("url", "")
                 and "blob:" not in t.get("url", "")

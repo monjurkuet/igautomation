@@ -1,4 +1,5 @@
 """Daemon CLI subcommands for igx."""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +18,13 @@ from rich.console import Console
 
 from igautomation.daemon.cron_config import default_cron_jobs, next_runs, render_crontab
 from igautomation.daemon.loop import DaemonLoop
-from igautomation.daemon.process import is_process_running, pid_path_for, read_pid, remove_pid, write_pid
+from igautomation.daemon.process import (
+    is_process_running,
+    pid_path_for,
+    read_pid,
+    remove_pid,
+    write_pid,
+)
 from igautomation.daemon.service_config import render_service, service_file_name, user_systemd_dir
 from igautomation.daemon.strategies import DaemonConfig
 
@@ -132,6 +139,7 @@ def status(
     running = is_process_running(pid) if pid is not None else False
 
     from rich.table import Table
+
     table = Table(title="Daemon Status")
     table.add_column("Key", style="dim")
     table.add_column("Value")
@@ -181,6 +189,7 @@ def analyze_cmd(
             raise typer.Exit(1)
 
         from rich.table import Table
+
         table = Table(title=f"Analysis: {analysis_type}")
         table.add_column("Key", style="dim")
         table.add_column("Value")
@@ -200,7 +209,9 @@ def analyze_cmd(
 @daemon_app.command()
 def cron_show(
     db_path: Annotated[str, typer.Option("--db", help="Database path")] = "igautomation.db",
-    project_dir: Annotated[str, typer.Option("--project-dir", help="Project directory for crontab cd")] = str(Path.cwd()),
+    project_dir: Annotated[
+        str, typer.Option("--project-dir", help="Project directory for crontab cd")
+    ] = str(Path.cwd()),
 ) -> None:
     """Print rendered crontab entries."""
     jobs = default_cron_jobs(db_path=shlex.quote(db_path))
@@ -222,7 +233,9 @@ def cron_next(
 @daemon_app.command()
 def cron_install(
     db_path: Annotated[str, typer.Option("--db", help="Database path")] = "igautomation.db",
-    project_dir: Annotated[str, typer.Option("--project-dir", help="Project directory")] = str(Path.cwd()),
+    project_dir: Annotated[str, typer.Option("--project-dir", help="Project directory")] = str(
+        Path.cwd()
+    ),
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Print without modifying")] = False,
 ) -> None:
     """Install cron jobs into user crontab (managed block)."""
@@ -233,6 +246,7 @@ def cron_install(
         console.print(crontab_block)
         return
     import subprocess as sp
+
     try:
         existing = sp.run(["crontab", "-l"], capture_output=True, text=True).stdout
     except FileNotFoundError:
@@ -265,6 +279,7 @@ def cron_uninstall(
 ) -> None:
     """Remove igautomation managed cron block."""
     import subprocess as sp
+
     try:
         existing = sp.run(["crontab", "-l"], capture_output=True, text=True).stdout
     except FileNotFoundError:
@@ -298,7 +313,9 @@ def cron_uninstall(
 @daemon_app.command()
 def service_show(
     db_path: Annotated[str, typer.Option("--db", help="Database path")] = "igautomation.db",
-    project_dir: Annotated[str, typer.Option("--project-dir", help="Project directory")] = str(Path.cwd()),
+    project_dir: Annotated[str, typer.Option("--project-dir", help="Project directory")] = str(
+        Path.cwd()
+    ),
 ) -> None:
     """Print systemd user service file content."""
     svc = render_service(db_path=shlex.quote(db_path), project_dir=shlex.quote(project_dir))
@@ -308,7 +325,9 @@ def service_show(
 @daemon_app.command()
 def service_install(
     db_path: Annotated[str, typer.Option("--db", help="Database path")] = "igautomation.db",
-    project_dir: Annotated[str, typer.Option("--project-dir", help="Project directory")] = str(Path.cwd()),
+    project_dir: Annotated[str, typer.Option("--project-dir", help="Project directory")] = str(
+        Path.cwd()
+    ),
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Print without modifying")] = False,
 ) -> None:
     """Install systemd user service file."""
@@ -322,7 +341,9 @@ def service_install(
     svc_path = Path(svc_dir) / service_file_name()
     svc_path.write_text(svc)
     console.print(f"[green]Service file written to {svc_path}[/green]")
-    console.print("[dim]Next: systemctl --user daemon-reload && systemctl --user start igautomation-daemon[/dim]")
+    console.print(
+        "[dim]Next: systemctl --user daemon-reload && systemctl --user start igautomation-daemon[/dim]"
+    )
 
 
 @daemon_app.command()

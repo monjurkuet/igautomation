@@ -56,9 +56,7 @@ class SessionScheduleConfig(BaseModel):
         le=1.0,
         description="Probability of a tight cluster (short gap after previous session)",
     )
-    cluster_gap_minutes: int = Field(
-        5, ge=1, description="Minutes between sessions in a cluster"
-    )
+    cluster_gap_minutes: int = Field(5, ge=1, description="Minutes between sessions in a cluster")
 
     @field_validator("max_sessions_per_day")
     @classmethod
@@ -75,9 +73,7 @@ class SessionScheduleConfig(BaseModel):
     def _validate_max_gap(cls, v, info):
         min_val = info.data.get("min_gap_minutes")
         if min_val is not None and v < min_val:
-            raise ValueError(
-                f"max_gap_minutes ({v}) must be >= min_gap_minutes ({min_val})"
-            )
+            raise ValueError(f"max_gap_minutes ({v}) must be >= min_gap_minutes ({min_val})")
         return v
 
     # Activity profile weights by hour (UTC) — higher weight = more likely
@@ -85,10 +81,23 @@ class SessionScheduleConfig(BaseModel):
     # 12:00=18:00BDT evening peak, 17:00=23:00BDT late night
     activity_weights: dict[int, float] = Field(
         default_factory=lambda: {
-            1: 0.6, 2: 0.5, 3: 0.4, 4: 0.3, 5: 0.3, 6: 0.5,   # early BDT morning
-            7: 0.8, 8: 0.9, 9: 1.0, 10: 0.9,                     # BDT midday peak
-            11: 0.8, 12: 0.7, 13: 0.6, 14: 0.5,                  # BDT afternoon
-            15: 0.4, 16: 0.5, 17: 0.6,                            # BDT evening
+            1: 0.6,
+            2: 0.5,
+            3: 0.4,
+            4: 0.3,
+            5: 0.3,
+            6: 0.5,  # early BDT morning
+            7: 0.8,
+            8: 0.9,
+            9: 1.0,
+            10: 0.9,  # BDT midday peak
+            11: 0.8,
+            12: 0.7,
+            13: 0.6,
+            14: 0.5,  # BDT afternoon
+            15: 0.4,
+            16: 0.5,
+            17: 0.6,  # BDT evening
         },
         description="Hour (UTC) → activity weight (higher = more sessions in that hour)",
     )
@@ -148,7 +157,9 @@ class SessionScheduler:
 
         # Build weighted hour distribution — handle wrap-around (wake > sleep)
         if self._config.sleep_hour <= self._config.wake_hour:
-            hours = list(range(self._config.wake_hour, 24)) + list(range(0, self._config.sleep_hour))
+            hours = list(range(self._config.wake_hour, 24)) + list(
+                range(0, self._config.sleep_hour)
+            )
         else:
             hours = list(range(self._config.wake_hour, self._config.sleep_hour))
         weights = [self._config.activity_weights.get(h, 0.5) for h in hours]
@@ -176,8 +187,12 @@ class SessionScheduler:
             minute = random.randint(0, 59)
             second = random.randint(0, 59)
             slot = datetime(
-                day.year, day.month, day.day,
-                hour, minute, second,
+                day.year,
+                day.month,
+                day.day,
+                hour,
+                minute,
+                second,
                 tzinfo=timezone.utc,
             )
             slots.append(slot)
@@ -255,8 +270,12 @@ class SessionScheduler:
         # Day boundary — no session past sleep_hour
         day = slots[0].date()
         sleep_time = datetime(
-            day.year, day.month, day.day,
-            self._config.sleep_hour, 0, 0,
+            day.year,
+            day.month,
+            day.day,
+            self._config.sleep_hour,
+            0,
+            0,
             tzinfo=timezone.utc,
         )
         # Handle wrap-around: if sleep_hour < wake_hour, sleep is next day
@@ -296,4 +315,3 @@ class SessionScheduler:
             prev = candidate
 
         return result
-

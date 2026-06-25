@@ -93,9 +93,7 @@ class AsyncDatabaseStore:
         username = data["username"]
 
         # Check if account exists
-        cur = await self.db.execute(
-            "SELECT id FROM accounts WHERE username = ?", (username,)
-        )
+        cur = await self.db.execute("SELECT id FROM accounts WHERE username = ?", (username,))
         row = await cur.fetchone()
 
         if row:
@@ -104,11 +102,21 @@ class AsyncDatabaseStore:
             update_fields = []
             update_values: list[Any] = []
             for key in (
-                "user_id", "full_name", "bio", "profile_pic_url",
-                "is_private", "is_verified", "follower_count",
-                "following_count", "post_count", "category", "tier",
-                "growth_rate", "growth_status",
-                "relevance_score", "is_active",
+                "user_id",
+                "full_name",
+                "bio",
+                "profile_pic_url",
+                "is_private",
+                "is_verified",
+                "follower_count",
+                "following_count",
+                "post_count",
+                "category",
+                "tier",
+                "growth_rate",
+                "growth_status",
+                "relevance_score",
+                "is_active",
             ):
                 if key in data:
                     update_fields.append(f"{key} = ?")
@@ -130,10 +138,21 @@ class AsyncDatabaseStore:
         fields = ["username", "first_seen_at", "last_checked_at", "created_at", "updated_at"]
         values: list[Any] = [username, now, now, now, now]
         for key in (
-            "user_id", "full_name", "bio", "profile_pic_url",
-            "is_private", "is_verified", "follower_count",
-            "following_count", "post_count", "category", "tier",
-            "growth_rate", "growth_status", "relevance_score", "is_active",
+            "user_id",
+            "full_name",
+            "bio",
+            "profile_pic_url",
+            "is_private",
+            "is_verified",
+            "follower_count",
+            "following_count",
+            "post_count",
+            "category",
+            "tier",
+            "growth_rate",
+            "growth_status",
+            "relevance_score",
+            "is_active",
         ):
             if key in data:
                 fields.append(key)
@@ -149,20 +168,9 @@ class AsyncDatabaseStore:
 
     async def get_account_by_username(self, username: str) -> dict | None:
         """Return account dict by username, or None."""
-        cur = await self.db.execute(
-            "SELECT * FROM accounts WHERE username = ?", (username,)
-        )
+        cur = await self.db.execute("SELECT * FROM accounts WHERE username = ?", (username,))
         row = await cur.fetchone()
         return dict(row) if row else None
-
-    async def get_accounts_by_tier(self, tier: str) -> list[dict]:
-        """Return all accounts matching the given tier."""
-        cur = await self.db.execute(
-            "SELECT * FROM accounts WHERE tier = ? ORDER BY relevance_score DESC",
-            (tier,),
-        )
-        rows = await cur.fetchall()
-        return [dict(r) for r in rows]
 
     async def get_unanalyzed_accounts(self, limit: int = 50) -> list[dict]:
         """Return accounts that have no follower_count (never profiled).
@@ -270,9 +278,7 @@ class AsyncDatabaseStore:
         await self.db.commit()
         return cur.lastrowid  # type: ignore[return-value]
 
-    async def get_follower_snapshots(
-        self, account_id: int, limit: int = 30
-    ) -> list[dict]:
+    async def get_follower_snapshots(self, account_id: int, limit: int = 30) -> list[dict]:
         """Return follower snapshots for an account, oldest first."""
         cur = await self.db.execute(
             """
@@ -335,8 +341,9 @@ class AsyncDatabaseStore:
     # sessions
     # ------------------------------------------------------------------
 
-    async def create_session(self, session_uuid: str, strategy: str = "discovery",
-                           ig_account_id: int | None = None) -> int:
+    async def create_session(
+        self, session_uuid: str, strategy: str = "discovery", ig_account_id: int | None = None
+    ) -> int:
         """Start a new daemon session record."""
         cur = await self.db.execute(
             "INSERT INTO sessions (session_uuid, strategy, ig_account_id) VALUES (?, ?, ?)",
@@ -404,6 +411,7 @@ class AsyncDatabaseStore:
         Accepts findings/recommendations/metrics as either pre-serialized
         JSON strings OR native Python objects.
         """
+
         def _ensure_serialized(value: object) -> object:
             if not isinstance(value, str):
                 return value
@@ -437,9 +445,7 @@ class AsyncDatabaseStore:
         now = _now()
         url = data["url"]
 
-        cur = await self.db.execute(
-            "SELECT id FROM content_items WHERE url = ?", (url,)
-        )
+        cur = await self.db.execute("SELECT id FROM content_items WHERE url = ?", (url,))
         row = await cur.fetchone()
 
         if row:
@@ -447,13 +453,29 @@ class AsyncDatabaseStore:
             update_fields = []
             update_values: list[Any] = []
             for key in (
-                "shortcode", "content_type", "owner_username", "owner_id",
-                "caption", "hashtags", "mentions", "media_type",
-                "video_url", "video_view_count", "video_play_count",
-                "like_count", "comment_count", "timestamp",
-                "llm_analysis", "llm_collection_suggestion", "llm_tags",
-                "is_bd_relevant", "content_niche", "priority",
-                "category", "notes", "engagement_status",
+                "shortcode",
+                "content_type",
+                "owner_username",
+                "owner_id",
+                "caption",
+                "hashtags",
+                "mentions",
+                "media_type",
+                "video_url",
+                "video_view_count",
+                "video_play_count",
+                "like_count",
+                "comment_count",
+                "timestamp",
+                "llm_analysis",
+                "llm_collection_suggestion",
+                "llm_tags",
+                "is_bd_relevant",
+                "content_niche",
+                "priority",
+                "category",
+                "notes",
+                "engagement_status",
             ):
                 if key in data:
                     update_fields.append(f"{key} = ?")
@@ -474,13 +496,29 @@ class AsyncDatabaseStore:
         fields = ["url", "first_seen_at", "created_at", "updated_at"]
         values: list[Any] = [url, now, now, now]
         for key in (
-            "shortcode", "content_type", "owner_username", "owner_id",
-            "caption", "hashtags", "mentions", "media_type",
-            "video_url", "video_view_count", "video_play_count",
-            "like_count", "comment_count", "timestamp",
-            "llm_analysis", "llm_collection_suggestion", "llm_tags",
-            "is_bd_relevant", "content_niche", "priority",
-            "category", "notes", "engagement_status",
+            "shortcode",
+            "content_type",
+            "owner_username",
+            "owner_id",
+            "caption",
+            "hashtags",
+            "mentions",
+            "media_type",
+            "video_url",
+            "video_view_count",
+            "video_play_count",
+            "like_count",
+            "comment_count",
+            "timestamp",
+            "llm_analysis",
+            "llm_collection_suggestion",
+            "llm_tags",
+            "is_bd_relevant",
+            "content_niche",
+            "priority",
+            "category",
+            "notes",
+            "engagement_status",
         ):
             if key in data:
                 fields.append(key)
@@ -496,9 +534,7 @@ class AsyncDatabaseStore:
 
     async def get_content_item_by_url(self, url: str) -> dict | None:
         """Return content item dict by URL, or None."""
-        cur = await self.db.execute(
-            "SELECT * FROM content_items WHERE url = ?", (url,)
-        )
+        cur = await self.db.execute("SELECT * FROM content_items WHERE url = ?", (url,))
         row = await cur.fetchone()
         return dict(row) if row else None
 
@@ -632,9 +668,7 @@ class AsyncDatabaseStore:
         cover_media_id: str | None = None,
     ) -> int:
         """Insert or update a collection by name. Returns the collection id."""
-        cur = await self.db.execute(
-            "SELECT id FROM collections WHERE name = ?", (name,)
-        )
+        cur = await self.db.execute("SELECT id FROM collections WHERE name = ?", (name,))
         row = await cur.fetchone()
 
         if row:
@@ -682,9 +716,7 @@ class AsyncDatabaseStore:
 
     async def get_collection_by_name(self, name: str) -> dict | None:
         """Return collection by name."""
-        cur = await self.db.execute(
-            "SELECT * FROM collections WHERE name = ?", (name,)
-        )
+        cur = await self.db.execute("SELECT * FROM collections WHERE name = ?", (name,))
         row = await cur.fetchone()
         return dict(row) if row else None
 
@@ -722,9 +754,7 @@ class AsyncDatabaseStore:
         now = _now()
         port = data["port"]
 
-        cur = await self.db.execute(
-            "SELECT id FROM ig_accounts WHERE port = ?", (port,)
-        )
+        cur = await self.db.execute("SELECT id FROM ig_accounts WHERE port = ?", (port,))
         row = await cur.fetchone()
 
         if row:
@@ -732,11 +762,21 @@ class AsyncDatabaseStore:
             update_fields = []
             update_values: list[Any] = []
             for key in (
-                "username", "user_id", "full_name", "profile_pic_url",
-                "is_private", "is_verified", "follower_count",
-                "follower_snapshot_at", "status", "last_used_at",
-                "daily_session_count", "daily_reset_at",
-                "cooldown_until", "preferred_strategies", "warmup_complete",
+                "username",
+                "user_id",
+                "full_name",
+                "profile_pic_url",
+                "is_private",
+                "is_verified",
+                "follower_count",
+                "follower_snapshot_at",
+                "status",
+                "last_used_at",
+                "daily_session_count",
+                "daily_reset_at",
+                "cooldown_until",
+                "preferred_strategies",
+                "warmup_complete",
             ):
                 if key in data:
                     update_fields.append(f"{key} = ?")
@@ -757,11 +797,21 @@ class AsyncDatabaseStore:
         fields = ["port", "created_at", "updated_at"]
         values: list[Any] = [port, now, now]
         for key in (
-            "username", "user_id", "full_name", "profile_pic_url",
-            "is_private", "is_verified", "follower_count",
-            "follower_snapshot_at", "status", "last_used_at",
-            "daily_session_count", "daily_reset_at",
-            "cooldown_until", "preferred_strategies", "warmup_complete",
+            "username",
+            "user_id",
+            "full_name",
+            "profile_pic_url",
+            "is_private",
+            "is_verified",
+            "follower_count",
+            "follower_snapshot_at",
+            "status",
+            "last_used_at",
+            "daily_session_count",
+            "daily_reset_at",
+            "cooldown_until",
+            "preferred_strategies",
+            "warmup_complete",
         ):
             if key in data:
                 fields.append(key)
@@ -777,17 +827,13 @@ class AsyncDatabaseStore:
 
     async def get_ig_account_by_port(self, port: int) -> dict | None:
         """Return IG account dict by CDP port, or None."""
-        cur = await self.db.execute(
-            "SELECT * FROM ig_accounts WHERE port = ?", (port,)
-        )
+        cur = await self.db.execute("SELECT * FROM ig_accounts WHERE port = ?", (port,))
         row = await cur.fetchone()
         return dict(row) if row else None
 
     async def get_all_ig_accounts(self) -> list[dict]:
         """Return all tracked IG accounts."""
-        cur = await self.db.execute(
-            "SELECT * FROM ig_accounts ORDER BY port"
-        )
+        cur = await self.db.execute("SELECT * FROM ig_accounts ORDER BY port")
         rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
@@ -820,88 +866,9 @@ class AsyncDatabaseStore:
         )
         await self.db.commit()
 
-    async def reset_daily_ig_accounts(self) -> None:
-        """Reset daily_session_count for all IG accounts (called at day boundary)."""
-        now = _now()
-        await self.db.execute(
-            "UPDATE ig_accounts SET daily_session_count = 0, daily_reset_at = ?, updated_at = ?",
-            (now, now),
-        )
-        await self.db.commit()
-
-    async def set_account_cooldown(self, ig_account_id: int, cooldown_seconds: int) -> None:
-        """Set a cooldown on an IG account (e.g. after 429 rate limit)."""
-        from datetime import timedelta
-        now = datetime.now(timezone.utc)
-        until = (now + timedelta(seconds=cooldown_seconds)).isoformat()
-        await self.db.execute(
-            "UPDATE ig_accounts SET cooldown_until = ?, status = 'rate_limited', updated_at = ? WHERE id = ?",
-            (until, _now(), ig_account_id),
-        )
-        await self.db.commit()
-
-    async def get_noncooled_ig_accounts(self) -> list[dict]:
-        """Return IG accounts that are NOT in cooldown (active/sleeping + cooldown expired)."""
-        now = _now()
-        cur = await self.db.execute(
-            """SELECT * FROM ig_accounts
-            WHERE status IN ('active', 'sleeping')
-            AND (cooldown_until IS NULL OR cooldown_until < ?)
-            ORDER BY CASE WHEN last_used_at IS NULL THEN 0 ELSE 1 END, last_used_at ASC, port ASC""",
-            (now,),
-        )
-        rows = await cur.fetchall()
-        return [dict(r) for r in rows]
-
-    async def get_unfollow_candidates(self, grace_days: int = 7, limit: int = 20) -> list[dict]:
-        """Return accounts we followed 7+ days ago that haven't followed back."""
-        cur = await self.db.execute(
-            """SELECT a.id, a.username, fl.performed_at as followed_at
-            FROM accounts a
-            JOIN interaction_log fl ON a.id = fl.account_id AND fl.action_type = 'follow'
-            LEFT JOIN interaction_log fbl ON a.id = fbl.account_id AND fbl.action_type = 'follow_back'
-            WHERE fbl.id IS NULL
-            AND fl.performed_at < datetime('now', ? || ' days')
-            AND a.is_active = 1
-            ORDER BY fl.performed_at ASC
-            LIMIT ?""",
-            (f"-{grace_days}", limit),
-        )
-        rows = await cur.fetchall()
-        return [dict(r) for r in rows]
-
-    async def get_story_candidates(self, limit: int = 20) -> list[dict]:
-        """Return accounts we follow (have follow interaction) for story viewing."""
-        cur = await self.db.execute(
-            """SELECT DISTINCT a.id, a.username
-            FROM accounts a
-            JOIN interaction_log il ON a.id = il.account_id AND il.action_type = 'follow'
-            WHERE a.is_active = 1
-            ORDER BY RANDOM()
-            LIMIT ?""",
-            (limit,),
-        )
-        rows = await cur.fetchall()
-        return [dict(r) for r in rows]
-
-    async def get_comment_candidates(self, limit: int = 10) -> list[dict]:
-        """Return content items we've already engaged with (good candidates for comments)."""
-        cur = await self.db.execute(
-            """SELECT ci.id, ci.url, ci.shortcode, ci.owner_username, ci.caption
-            FROM content_items ci
-            WHERE ci.engagement_status IN ('engaged', 'viewed')
-            AND ci.url NOT IN (
-                SELECT detail FROM interaction_log WHERE action_type = 'comment'
-            )
-            ORDER BY RANDOM()
-            LIMIT ?""",
-            (limit,),
-        )
-        rows = await cur.fetchall()
-        return [dict(r) for r in rows]
-
-    async def snapshot_own_account(self, ig_account_id: int, follower_count: int,
-                                    following_count: int = 0) -> None:
+    async def snapshot_own_account(
+        self, ig_account_id: int, follower_count: int, following_count: int = 0
+    ) -> None:
         """Update own IG account's follower snapshot."""
         now = _now()
         await self.db.execute(
